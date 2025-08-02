@@ -29,6 +29,8 @@ static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
+
+struct lock load_lock;
 /**
  현재 스레드의 자식 프로세스 중에서 특정 PID를 가진 자식을 찾는 함수
  */
@@ -52,6 +54,7 @@ struct thread *get_child_with_pid(tid_t pid) {
 /* General process initializer for initd and other process. */
 static void process_init(void) {
     struct thread *current = thread_current();
+    lock_init(&load_lock);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -108,6 +111,7 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
 
     /* 부모의 인터럽트 프레임을 저장(복사용임) */
     curr->parent_if = if_;
+    // tf 사용하면 안되나?
 
     // 새 스레드 생성
     tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, curr);
@@ -230,6 +234,7 @@ static void __do_fork(void *aux) {
 
     /* 성공적으로 완료되면 부모에게 알리기 */
     if (succ) {
+        // 굳이 안 해도 됨.
         current->exit_status = 0;
         sema_up(&current->fork_sema);
     }
@@ -313,6 +318,7 @@ int process_exec(void *f_name) {
         arg_list[arg_cnt++] = arg;
     }
 
+//    lock_acquire(&exec_lock);
     // 파싱된 인자가 없으면 로드 실패 처리
     if (arg_cnt == 0) {
         success = false;
@@ -326,6 +332,7 @@ int process_exec(void *f_name) {
         palloc_free_page(f_name);
         return -1;
     }
+//    lock_release(&exec_lock);
 
     argument_stack(arg_list, arg_cnt, &_if, buffer);
 
@@ -379,6 +386,7 @@ int process_wait(tid_t child_tid) {
     if (child_thread->is_waited) {
         return -1;
     }
+
     // wait 호출여부 표시
     child_thread->is_waited = true;
 
@@ -404,6 +412,13 @@ void process_exit(void) {
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
+    /* 자식 프로세스가 종료될 때 부모에게 알리기 */
+    if (curr->parent != NULL) {
+        /* 부모가 wait 중이라면 깨우기 */
+        sema_up(&curr->wait_sema);
+        /* 부모가 자식 정리를 완료할 때까지 대기 */
+        sema_down(&curr->exit_sema);
+    }
 
     // 모든 FDT 닫기
     for (int i = 2; i < FDT_MAX_SIZE; i++) {
@@ -416,14 +431,6 @@ void process_exit(void) {
     if (curr->running_file != NULL) {
         // file_allow_write(curr->running_file);
         file_close(curr->running_file);  // 실행 중인 파일 닫기
-    }
-
-    /* 자식 프로세스가 종료될 때 부모에게 알리기 */
-    if (curr->parent != NULL) {
-        /* 부모가 wait 중이라면 깨우기 */
-        sema_up(&curr->wait_sema);
-        /* 부모가 자식 정리를 완료할 때까지 대기 */
-        sema_down(&curr->exit_sema);
     }
 
      process_cleanup();
@@ -546,6 +553,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
     process_activate(thread_current());
 
     /* Open executable file. */
+    lock_acquire(&load_lock);
     file = filesys_open(file_name);
     if (file == NULL) {
         printf("load: %s: open failed\n", file_name);
@@ -621,6 +629,7 @@ static bool load(const char *file_name, struct intr_frame *if_) {
                 break;
         }
     }
+    lock_release(&load_lock);
 
     /* Set up stack. */
     if (!setup_stack(if_))
