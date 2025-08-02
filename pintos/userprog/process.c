@@ -318,7 +318,6 @@ int process_exec(void *f_name) {
         arg_list[arg_cnt++] = arg;
     }
 
-//    lock_acquire(&exec_lock);
     // 파싱된 인자가 없으면 로드 실패 처리
     if (arg_cnt == 0) {
         success = false;
@@ -332,7 +331,6 @@ int process_exec(void *f_name) {
         palloc_free_page(f_name);
         return -1;
     }
-//    lock_release(&exec_lock);
 
     argument_stack(arg_list, arg_cnt, &_if, buffer);
 

@@ -213,17 +213,8 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
     t->fdt[0] = NULL;
     t->fdt[1] = NULL;
 
-    /* 부모-자식 관계 설정 및 세마포어 초기화 */
-
+    /* 부모-자식 관계 설정 */
     struct thread *curr = thread_current();
-
-//    /* 세마포어 초기화 */
-//    sema_init(&t->fork_sema, 0);
-//    sema_init(&t->wait_sema, 0);
-//    sema_init(&t->exit_sema, 0);
-
-    /* 리스트 초기화 */
-    list_init(&t->child_list);
 
     /* 부모-자식 관계 설정 */
     t->parent = curr;
