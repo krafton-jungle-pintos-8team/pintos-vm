@@ -1,12 +1,12 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
-
-#include "../threads/palloc.h"
-#include "anon.h"
-#include "vm/file.h"
-#include "vm/uninit.h"
+#include "threads/palloc.h"
 #include "vm/vm_type.h"
+
+#include "vm/uninit.h"
+#include "vm/anon.h"
+#include "vm/file.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -67,7 +67,7 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {};
 
-#include "../threads/thread.h"
+#include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,
                                   struct supplemental_page_table *src);
