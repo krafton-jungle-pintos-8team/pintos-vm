@@ -79,10 +79,13 @@ void hash_destroy(struct hash *h, hash_action_func *destructor) {
     free(h->buckets);
 }
 
-/* Inserts NEW into hash table H and returns a null pointer, if
-   no equal element is already in the table.
-   If an equal element is already in the table, returns it
-   without inserting NEW. */
+/* NEW를 해시 테이블 H에 삽입하고,
+동등한(equal)한 요소가 테이블에 **이미 존재하지 않으면**  
+`null 포인터`를 반환합니다. (즉, 삽입이 성공한 경우)
+
+만약 **동등한 요소가 이미 테이블에 존재한다면**,  
+NEW는 삽입하지 않고,  
+그 **기존 요소를 반환**합니다. */
 struct hash_elem *hash_insert(struct hash *h, struct hash_elem *new) {
     struct list *bucket = find_bucket(h, new);
     struct hash_elem *old = find_elem(h, bucket, new);
@@ -180,26 +183,35 @@ void hash_first(struct hash_iterator *i, struct hash *h) {
     i->elem = list_elem_to_hash_elem(list_head(i->bucket));
 }
 
-/* Advances I to the next element in the hash table and returns
-   it.  Returns a null pointer if no elements are left.  Elements
-   are returned in arbitrary order.
+/* I를 해시 테이블에서 다음 요소로 이동시키고, 그 요소를 반환합니다.  
+더 이상 남은 요소가 없으면 null 포인터를 반환합니다.  
+요소들은 임의의 순서로 반환됩니다.
 
-   Modifying a hash table H during iteration, using any of the
-   functions hash_clear(), hash_destroy(), hash_insert(),
-   hash_replace(), or hash_delete(), invalidates all
-   iterators. */
+해시 테이블 H를 순회(iteration)하는 도중에  
+hash_clear(), hash_destroy(), hash_insert(),  
+hash_replace(), hash_delete() 같은 함수로  
+수정하면, **모든 반복자(iterator)가 무효화됩니다.** */
 struct hash_elem *hash_next(struct hash_iterator *i) {
     ASSERT(i != NULL);
 
+    // 현재 i->elem의 다음 리스트 요소 return
     i->elem = list_elem_to_hash_elem(list_next(&i->elem->list_elem));
+    
+    // 이동한 다음 요소가 현재 bucket의 끝이라면, 다음 bucket으로 이동
     while (i->elem == list_elem_to_hash_elem(list_end(i->bucket))) {
+        /*
+            현재 bucket이 마지막 bucket을 넘어섰는지 확인
+            i->hash->buckets: 첫 번째 bucket의 포인터
+            i->hash->buckets + i->hash->bucket_cnt: 마지막 bucket **다음 위치** (즉, 범위의 끝)
+            ++i->bucket: 다음 bucket으로 이동
+        */
         if (++i->bucket >= i->hash->buckets + i->hash->bucket_cnt) {
             i->elem = NULL;
             break;
         }
+        // 현재 bucket 리스트의 다음 bucket의 처음 elem의 주소
         i->elem = list_elem_to_hash_elem(list_begin(i->bucket));
     }
-
     return i->elem;
 }
 

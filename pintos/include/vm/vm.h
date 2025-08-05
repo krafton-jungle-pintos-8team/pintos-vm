@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include "threads/palloc.h"
 #include "vm/vm_type.h"
-
+#include "lib/kernel/hash.h"
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
@@ -16,16 +16,26 @@ struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
 
+/* 프레임 테이블은 무엇이 필요할까?
+    1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?
+    그리고 또?
+*/
+struct frame_table {
+    struct list frames;
+
+};
+
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
  * uninit_page, file_page, anon_page, and page cache (project4).
  * DO NOT REMOVE/MODIFY PREDEFINED MEMBER OF THIS STRUCTURE. */
 struct page {
     const struct page_operations *operations;
-    void *va;            /* Address in terms of user space */
-    struct frame *frame; /* Back reference for frame */
+    void *va;              /* 사용자 공간의 주소 */
+    struct frame *frame;   /* 해당 프레임에 대한 역참조 */
 
     /* Your implementation */
+    struct hash_elem hash_elem;
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
@@ -40,9 +50,12 @@ struct page {
 };
 
 /* The representation of "frame" */
+/* 프레임 관리 인터페이스를 구현하는 과정에서 더 많은 멤버를 추가해도 됩니다. */
 struct frame {
     void *kva;
     struct page *page;
+    // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
+    bool reference_bit;
 };
 
 /* The function table for page operations.
@@ -65,7 +78,9 @@ struct page_operations {
 /* Representation of current process's memory space.
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
-struct supplemental_page_table {};
+struct supplemental_page_table {
+    struct hash pages;
+};
 
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
