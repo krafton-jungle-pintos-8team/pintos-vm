@@ -64,9 +64,9 @@ struct hash {
 
 /* A hash table iterator. */
 struct hash_iterator {
-    struct hash *hash;      /* The hash table. */
-    struct list *bucket;    /* Current bucket. */
-    struct hash_elem *elem; /* Current hash element in current bucket. */
+    struct hash *hash;       // 순회할 해시 테이블
+    struct hash_elem *elem;  // 현재 가리키고 있는 요소
+    struct list *bucket;     // 현재 버킷 (리스트 배열 중 하나)
 };
 
 /* Basic life cycle. */
