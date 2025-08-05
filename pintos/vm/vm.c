@@ -5,6 +5,9 @@
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 
+bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+unsigned page_hash(const struct hash_elem *p_, void *aux UNUSED);
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void vm_init(void) {
@@ -61,16 +64,33 @@ err:
 struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
     struct page *page = NULL;
     /* TODO: Fill this function. */
-
+    // va에 해당하는 page를 찾음.
+    struct hash_iterator i;
+    hash_first(&i, h);
+    while (hash_next(&i)) {
+        struct page *temp = hash_entry(hash_cur(&i), struct page, h_elem);
+        if (temp->va == va) {
+            page = temp;
+            break;
+        }
+    }
     return page;
 }
 
 /* Insert PAGE into spt with validation. */
 bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
-    int succ = false;
     /* TODO: Fill this function. */
+    // find page
+    if (spt_find_page(spt, page->va) != NULL) {
+        return false;
+    }
 
-    return succ;
+    // insert page
+    if (hash_insert(spt->spt_hash, page->h_elem) != NULL) {
+        return false
+    }
+
+    return true;
 }
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
@@ -154,7 +174,9 @@ static bool vm_do_claim_page(struct page *page) {
 }
 
 /* Initialize new supplemental page table */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {}
+void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
+    hash_init(spt, page_func, page_less, NULL);
+}
 
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
@@ -164,4 +186,18 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
+}
+
+/* Returns a hash value for page p. */
+unsigned page_hash(const struct hash_elem *p_, void *aux UNUSED) {
+    const struct page *p = hash_entry(p_, struct page, h_elem);
+    return hash_bytes(&p->addr, sizeof p->addr);
+}
+
+/* Returns true if page a precedes page b. */
+bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
+    const struct page *a = hash_entry(a_, struct page, h_elem);
+    const struct page *b = hash_entry(b_, struct page, h_elem);
+
+    return a->addr < b->addr;
 }
