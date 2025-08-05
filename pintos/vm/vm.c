@@ -6,8 +6,7 @@
 #include "vm/inspect.h"
 
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
-bool page_less (const struct hash_elem *a_,
-           const struct hash_elem *b_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -88,18 +87,17 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
 
 /* Insert PAGE into spt with validation. */
 bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
-    /* TODO: 새로운 페이지를 보조 페이지 테이블에 삽입한다. */
-    struct hash_elem *find_hash_elem = hash_find(&spt->pages, &page->hash_elem);
-    if (find_hash_elem == NULL) {
+    /* TODO: Fill this function. */
+    // find page
+    if (spt_find_page(spt, page->va) != NULL) {
         return false;
     }
 
-    /* 삽입할 수 있으면 return NULL, otherwise return 삽입한 값 */
-    struct hash_elem *result_hash_elem = hash_insert(&spt->pages, find_hash_elem);
-    if (result_hash_elem != NULL) {
+    // insert page
+    if (hash_insert(&spt->pages, &page->hash_elem) != NULL) {
         return false;
     }
-    
+
     return true;
 }
 

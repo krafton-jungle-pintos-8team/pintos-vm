@@ -7,6 +7,8 @@
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
+#include "vm/uninit.h"
+#include "vm/vm_type.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
