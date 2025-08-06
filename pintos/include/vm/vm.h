@@ -21,10 +21,12 @@ struct thread;
 /* 프레임 테이블은 무엇이 필요할까?
     1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?
     그리고 또?
+    ai한테 힌트를 받아 어느 프레임을 가리키는지 알기 위해 어떤 멤버변수가 필요하다고 함
+    그래서 변하지 않는 고유한 값인 kva라고 생각?
 */
 struct frame_table {
-    struct list frames;
-
+    struct hash frames;
+    // void *kva;
 };
 
 /* The representation of "page".
@@ -56,6 +58,8 @@ struct page {
 struct frame {
     void *kva;
     struct page *page;
+    // list를 순회하기 위해 elem이 필요할 것 같은데 hash? list?
+    struct list_elem elem;
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
 };

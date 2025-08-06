@@ -1,7 +1,7 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "vm/vm.h"
-
+#include "include/threads/mmu.h"
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 
@@ -19,6 +19,7 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
+    
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -39,23 +40,50 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 
-/* Create the pending page object with initializer. If you want to create a
- * page, do not create it directly and make it through this function or
- * `vm_alloc_page`. */
+/* 초기화 함수를 사용해 **대기 중인 페이지 객체(pending page object)**를 생성한다.
+만약 페이지를 생성하고 싶다면, 직접 생성하지 말고 이 함수나 vm_alloc_page를 통해 만들어야 한다. */
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
+    // 메모리를 실제로 할당하지 않고, 초기화할 페이지가 필요하다고 등록만 한다.
     ASSERT(VM_TYPE(type) != VM_UNINIT)
 
     struct supplemental_page_table *spt = &thread_current()->spt;
-
+    bool result = false;
     /* Check wheter the upage is already occupied or not. */
     if (spt_find_page(spt, upage) == NULL) {
-        /* TODO: Create the page, fetch the initialier according to the VM type,
-         * TODO: and then create "uninit" page struct by calling uninit_new. You
-         * TODO: should modify the field after calling the uninit_new. */
-
-        /* TODO: Insert the page into the spt. */
-    }
+        /* TODO: 페이지를 생성하고, VM 타입에 따라 초기화 함수를 가져오세요. */
+        struct page *page = malloc(sizeof(struct page));
+        struct frame *frame = vm_get_frame();
+        if (page == NULL) {
+            return false;
+        }
+        switch (type)
+        {
+        /* TODO: 그런 다음 uninit_new를 호출해서 "uninit" 페이지 구조체를 생성하세요. */
+        /* TODO: uninit_new를 호출한 이후에는 해당 구조체의 필드를 수정해야 합니다. */
+        case VM_ANON:
+            /* code */
+            bool initializer = anon_initializer(page, type, frame->kva);
+            if (!initializer)  {
+                return false;
+            }
+            uninit_new(page, page->va, init, type, aux, initializer);
+            break;
+        case VM_FILE:
+            bool initializer = file_backed_initializer(page, type, frame->kva);
+            if (!initializer)  {
+                return false;
+            }
+            uninit_new(page, page->va, init, type, aux, initializer);
+            break;
+        case VM_PAGE_CACHE:
+            break;
+        default:
+            break;
+        }
+        /* TODO: 생성한 페이지를 SPT(supplemental page table)에 삽입하세요. */
+        return spt_insert_page(spt, page);
+    }   
 err:
     return false;
 }
@@ -77,7 +105,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
 
     // hash_next 이후 첫 번째 요소를 얻는다. 그러므로, 모든 요소 순회 가능
     while (hash_next (&hash_iter)) {  
-        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);    
         if (page->va == va) {
             return page;
         }
@@ -97,7 +125,6 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *pa
     if (hash_insert(&spt->pages, &page->hash_elem) != NULL) {
         return false;
     }
-
     return true;
 }
 
@@ -142,6 +169,21 @@ static struct frame *vm_get_frame(void) {
             - 그럼 page fault가 발생할거 같음.
         3. 프레임 축출(evict policy 축출 정책)을 사용하여 페이지 축출
     */
+    
+    void *kva = palloc_get_page(PAL_USER);
+    frame = malloc(sizeof(struct frame)); // 자원 해제 필요
+    // NULL인 경우 사용 가능한 공간이 없다.
+    if (kva == NULL || frame == NULL) {
+        panic("todo");
+    }
+    
+    frame->kva = kva;
+    frame->page = NULL;
+    // vm_get_frame이 호출됬다는건 이 프레임을 사용할 것이기 때문인가?
+    // 아니면 미리 만들어둔 것일까?
+    frame->reference_bit = 1; 
+    
+    /* TODO: swap out */
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
     return frame;
@@ -159,6 +201,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = NULL;
     /* TODO: Validate the fault */
+
     /* TODO: Your code goes here */
 
     return vm_do_claim_page(page);
@@ -171,23 +214,36 @@ void vm_dealloc_page(struct page *page) {
     free(page);
 }
 
-/* Claim the page that allocate on VA. */
+/* 가상 주소 VA에 할당된(되도록 할) 페이지를 점유한다. (일종의 예약 및 확보) */
 bool vm_claim_page(void *va UNUSED) {
-    struct page *page = NULL;
+    struct thread *curr = thread_current();
     /* TODO: Fill this function */
     /* 
-        주어진 가상 주소 va에 대해 페이지를 확보한다. 
-        페이지를 확보한다?
-        페이지를 할당한다?
-        그럼 page에 va를 넣으면 되는거 아닌가?
-        그리고 page를 보내면 끝?
+        va에 페이지 할당
+        해당 페이지에 프레임 할당
+        한 페이지를 얻어야 하고,
+        그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
+        
+        uninit 페이지를 만들어준다
+        uninit를 사용한다?
     */
+    struct page *page = spt_find_page(curr->spt, va);
+    if (page == NULL) {
+        return false;
+    }
+    
+    // spt_find_page(, va);
     return vm_do_claim_page(page);
 }
 
 /* Claim the PAGE and set up the mmu. */
+/*
+    실제 메모리의 물리 프레임과 가상 주소를 연결하는 것
+    이건 운영체제가 MMU를 통해 CPU가 주소를 해석할 수 있게 해주는 작업
+*/
 static bool vm_do_claim_page(struct page *page) {
     struct frame *frame = vm_get_frame();
+    struct thread *curr = thread_current();
     /*
         1. 페이지에 물리 프레임을 할당
         2. vm_get_frame을 호출하여 프레임을 확보한 뒤, MMU 설정
@@ -198,6 +254,8 @@ static bool vm_do_claim_page(struct page *page) {
     page->frame = frame;
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
+    // 가상 주소와 물리 주소를 매핑한 정보를 페이지 테이블에 추가해야 한다.
+    pml4_set_page(curr->pml4, page->va, frame->kva, 0);
 
     return swap_in(page, frame->kva);
 }
