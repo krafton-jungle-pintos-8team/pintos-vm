@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include "threads/palloc.h"
 #include "vm/vm_type.h"
-
+#include "lib/kernel/hash.h"
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
@@ -22,10 +22,12 @@ struct thread;
  * DO NOT REMOVE/MODIFY PREDEFINED MEMBER OF THIS STRUCTURE. */
 struct page {
     const struct page_operations *operations;
-    void *va;            /* Address in terms of user space */
-    struct frame *frame; /* Back reference for frame */
+    void *va;            /* 사용자 가상 공간의 주소 */
+
+    struct frame *frame; /* 해당 프레임에 대한 역참조. 즉, 연결된 물리 프레임 */
 
     /* Your implementation */
+    struct hash_elem hash_elem; // 해시 테이블용 요소
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
@@ -65,7 +67,9 @@ struct page_operations {
 /* Representation of current process's memory space.
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
-struct supplemental_page_table {};
+struct supplemental_page_table {
+  struct hash pages; // 해시 테이블: 키는 va, 값은 struct page
+};
 
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
