@@ -1,9 +1,13 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "vm/vm.h"
+#include "threads/mmu.h"
 
 #include "threads/malloc.h"
 #include "vm/inspect.h"
+
+// 전역, 정적 변수로 프레임 테이블 선언
+static struct frame_table frame_table;
 
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
@@ -19,6 +23,9 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
+
+    // 프레임 테이블 초기화
+    hash_init(&frame_table->frames);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -42,13 +49,18 @@ static struct frame *vm_evict_frame(void);
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
+/*
+ * 초기화 함수를 사용하여 보류 중인 페이지 객체를 생성합니다. 페이지를 생성하려면 직접 생성하지 말고,
+ * 이 함수 또는 vm_alloc_page를 통해 생성해야 합니다.
+ */
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
+
     ASSERT(VM_TYPE(type) != VM_UNINIT)
 
     struct supplemental_page_table *spt = &thread_current()->spt;
 
-    /* Check wheter the upage is already occupied or not. */
+    /* Check whether the upage is already occupied or not. */
     if (spt_find_page(spt, upage) == NULL) {
         /* TODO: Create the page, fetch the initialier according to the VM type,
          * TODO: and then create "uninit" page struct by calling uninit_new. You
@@ -142,13 +154,22 @@ palloc()을 사용하여 프레임을 가져옵니다.
 static struct frame *vm_get_frame(void) {
     struct frame *frame = NULL;
     /* TODO: Fill this function. */
-    /*
-        1. palloc으로 프레임을 가져온다.
-        2. 사용 가능한 페이지가 없다? (메모리가 부족한 경우)
-            - 사용자 풀의 공간이 모두 할당되었다는 의미인가?
-            - 그럼 page fault가 발생할거 같음.
-        3. 프레임 축출(evict policy 축출 정책)을 사용하여 페이지 축출
-    */
+
+    // 물리 메모리의 공간 할당 및 주소 얻어오기
+    void* kva = palloc_get_page(PAL_USER); // user pool이 맞는가?
+    if (kva == NULL) {
+        panic("todo");
+    }
+
+    // frame 구조체를 위한 공간 할당 -> 커널 페이지
+    frame = malloc(sizeof(struct frame));
+    if (frame == NULL) {
+        panic("malloc failed")
+    }
+
+    frame->kva = kva;
+    frame->page = NULL;
+
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
     return frame;
@@ -180,31 +201,35 @@ void vm_dealloc_page(struct page *page) {
 
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED) {
-    struct page *page = NULL;
     /* TODO: Fill this function */
-    /* 
-        주어진 가상 주소 va에 대해 페이지를 확보한다. 
-        페이지를 확보한다?
-        페이지를 할당한다?
-        그럼 page에 va를 넣으면 되는거 아닌가?
-        그리고 page를 보내면 끝?
-    */
+    struct page *page = spt_find_page(thread_current()->spt, va);
+
+    // spt 에 없을 때???
+    if (page == NULL) {
+        // vm_alloc_page(VM_UNINIT, va, true); // 불가능: uninit 상태의 페이지를 실제 페이지로.
+        // spt_insert_page(thread_current()->spt, page);
+        return false
+    }
+
     return vm_do_claim_page(page);
 }
 
 /* Claim the PAGE and set up the mmu. */
 static bool vm_do_claim_page(struct page *page) {
+    // 물리 프레임 가져오기
     struct frame *frame = vm_get_frame();
-    /*
-        1. 페이지에 물리 프레임을 할당
-        2. vm_get_frame을 호출하여 프레임을 확보한 뒤, MMU 설정
-        3. 가상 주소 -> 물리 주소 매핑, 매핑 성공 여부 반환
-    */
+
     /* Set links */
     frame->page = page;
     page->frame = frame;
 
+    // Frame Table에 추가
+    hash_insert(&frame_table.frames, frame->hash_elem);
+    /* TODO: reference bit 세팅 -> clock algorithm에 사용할 용도 (선하) */
+
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
+    // rw 세팅 값 -> 페이지에 writable 값을 추가하고 그걸 참조.
+    pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable);
 
     return swap_in(page, frame->kva);
 }
@@ -222,7 +247,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
     - page_less: 가상 주소를 기준으로 두 페이지를 비교하는 함수
     - NULL: 필요하면 추가 정보 전달(여기선 안 씀)
 
-    -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주소 기준으로 페이지 정보 저장/검색 가능해짐.
+    -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주[소 기준으로 페이지 정보 저장/검색 가능해짐.
   */
   hash_init(&spt->pages, page_hash, page_less, NULL);
 }

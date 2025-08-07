@@ -23,8 +23,7 @@ struct thread;
     그리고 또?
 */
 struct frame_table {
-    struct list frames;
-
+    struct hash frames;
 };
 
 /* The representation of "page".
@@ -38,6 +37,7 @@ struct page {
 
     /* Your implementation */
     struct hash_elem hash_elem;
+    bool writable;
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
@@ -56,6 +56,7 @@ struct page {
 struct frame {
     void *kva;
     struct page *page;
+    struct hash_elem hash_elem;
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
 };
