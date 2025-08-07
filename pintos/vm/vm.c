@@ -61,6 +61,7 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
+// spt 안에 있는 해시 테이블을 직접 순회하면서, va와 일치하는 struct page를 찾아서 리턴하는 함수
 struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
     /* TODO: Fill this function. */
     /*
@@ -71,12 +72,17 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
         3. hash_first 를 통해 첫번째 hash를 받아와 반복한다.
     */    
 
+    // hash_iterator는 해시 테이블을 순회할 때 사용하는 구조체
     struct hash_iterator hash_iter;
     // hash, bucket, elem(head) 초기화 - 순회를 시작할 준비만 한다..?
-    hash_first(&hash_iter, &spt->pages);
+    hash_first(&hash_iter, &spt->pages); // 순회를 시작할 준비만 해 줌(아직 아무것도 가리키지 않음)
 
     // hash_next 이후 첫 번째 요소를 얻는다. 그러므로, 모든 요소 순회 가능
     while (hash_next (&hash_iter)) {  
+        // hash_next()를 호출하면 다음 요소로 이동하면서, 내부 포인터가 그 요소를 가리킴.
+        // hash_cur()로 현재 요소(해시 테이블에 들어있는 하나의 hash_elem)를 가져옴.
+        // hash_entry()는 이 해시 요소가 속한 전체 struct page 객체를 반환해줌.
+        // 그런 다음, 그 page->va가 우리가 찾는 주소와 같으면 return page.
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
         if (page->va == va) {
             return page;
@@ -85,7 +91,8 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
     return NULL;
 }
 
-/* Insert PAGE into spt with validation. */
+/* spt에 page를 중복 없이 삽입하려는 함수 */
+// 이미 같은 va를 가진 page가 들어있으면 삽입하지 않음.
 bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
     /* TODO: Fill this function. */
     // find page
@@ -202,9 +209,22 @@ static bool vm_do_claim_page(struct page *page) {
     return swap_in(page, frame->kva);
 }
 
-/* Initialize new supplemental page table */
+/*
+  spt(supplemental page table)를 초기화하는 함수.
+  이 함수는 spt->pages라는 해시 테이블을 초기화해서, 앞으로 이 테이블에 가상 주소에 대응하는 페이지 정보를 저장할 수 있도록 준비하는 것.
+*/
 void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
-    hash_init(&spt->pages, page_hash, page_less, NULL);
+  /*
+    spt->pages라는 해시 테이블을 초기화함.
+    해시 테이블을 쓰려면 "어떤 방식으로 비교하고", "어떻게 해시 값을 만들지" 알려줘야 함.
+    - &spt->pages: 실제 해시 테이블
+    - page_hash: 가상 주소로 해시값을 만드는 함수
+    - page_less: 가상 주소를 기준으로 두 페이지를 비교하는 함수
+    - NULL: 필요하면 추가 정보 전달(여기선 안 씀)
+
+    -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주소 기준으로 페이지 정보 저장/검색 가능해짐.
+  */
+  hash_init(&spt->pages, page_hash, page_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -218,19 +238,23 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
 }
 
 /* 추가한 함수들 by git book 08.04 */
-/* Returns a hash value for page p. */
+/* 페이지의 가상 주소 va를 기반으로 해시값을 만드는 함수 */
+// 해시 테이블은 내부적으로 빠르게 찾기 위해 키(va)를 해시값으로 바꾸어서 저장함.
 unsigned
-page_hash (const struct hash_elem *p_, void *aux UNUSED) {
-  const struct page *p = hash_entry (p_, struct page, hash_elem);
-  return hash_bytes (&p->va, sizeof p->va);
+page_hash(const struct hash_elem *p_, void *aux UNUSED) {
+  // hash_entry()는 hash_elem 구조체 포인터를 struct page 포인터로 바꿔주는 매크로!
+  const struct page *p = hash_entry(p_, struct page, hash_elem);
+  return hash_bytes(&p->va, sizeof p->va); // p->va: 페이지의 가상 주소. 가상 주소의 바이트 값을 이용해 해시값을 계산함.
 }
 
-/* Returns true if page a precedes page b. */
+/* 두 페이지의 va 중 어느 게 더 작은지 비교해서 정렬 기준을 정하는 함수 */
+// 해시 테이블 내부에 충돌이 발생하면 비교 함수가 필요함. 같은 해시값일 때 정확히 어떤 페이지인지 비교해서 구분해야 하기 때문.
 bool
-page_less (const struct hash_elem *a_,
-           const struct hash_elem *b_, void *aux UNUSED) {
-  const struct page *a = hash_entry (a_, struct page, hash_elem);
-  const struct page *b = hash_entry (b_, struct page, hash_elem);
+page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
+  // a, b: 각각 해시 테이블에 저장된 페이지들
+  // a->va < b->va: 가상 주소 기준으로 비교함. 주소가 더 작은 페이지가 "먼저"라고 판단하는 기준임.
+  const struct page *a = hash_entry(a_, struct page, hash_elem);
+  const struct page *b = hash_entry(b_, struct page, hash_elem);
 
   return a->va < b->va;
 }
