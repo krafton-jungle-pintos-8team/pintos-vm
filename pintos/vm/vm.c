@@ -14,6 +14,7 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *au
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
+// 메인에서 1번만 호출되는, vm_system을 초기화하는 함수기 때문에, 전역으로 한번만 초기화 되어야하는 frame table도 여기서 init.
 void vm_init(void) {
     vm_anon_init();
     vm_file_init();
@@ -169,6 +170,10 @@ static struct frame *vm_get_frame(void) {
 
     frame->kva = kva;
     frame->page = NULL;
+    frame->reference_bit = 1;
+
+    // Frame Table에 추가
+    hash_insert(&frame_table.frames, frame->hash_elem);
 
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
@@ -222,10 +227,6 @@ static bool vm_do_claim_page(struct page *page) {
     /* Set links */
     frame->page = page;
     page->frame = frame;
-
-    // Frame Table에 추가
-    hash_insert(&frame_table.frames, frame->hash_elem);
-    /* TODO: reference bit 세팅 -> clock algorithm에 사용할 용도 (선하) */
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
     // rw 세팅 값 -> 페이지에 writable 값을 추가하고 그걸 참조.
