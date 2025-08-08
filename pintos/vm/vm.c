@@ -57,7 +57,7 @@ static struct frame *vm_evict_frame(void);
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
 
-    ASSERT(VM_TYPE(type) != VM_UNINIT)
+    ASSERT(VM_TYPE(type) != VM_UNINIT);
 
     struct supplemental_page_table *spt = &thread_current()->spt;
 
@@ -189,11 +189,46 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
+    // addr: 오류를 일으킨 주소
+    // user: 사용자가 접근, 커널이 접근?
+    // write: 쓰기 접근이었는지, 읽기 접근이었는지.
+    // not_present: 페이지가 존재하지 않는지, 읽기 전용 페이지에 쓰기 시도한건지.
+
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = NULL;
     /* TODO: Validate the fault */
     /* TODO: Your code goes here */
+    // 유효한 페이지 폴트
+    // 1. 사용자가, kernel 영역에 접근
+    if (user && is_kernel_vaddr(addr)) {
+        return false;
+    }
 
+    // 2. 사용자 영역 내에서 invalid 한 영역에 접근
+    if (USER_STACK <= (uint64_t) addr && (uint64_t) addr < KERN_BASE) { // 부등호 처리 확인하기***
+        return false;
+    }
+    if (0x0 <= (uint64_t) addr && (uint64_t) addr < 0x400000) { // 이게 맞나...?
+        return false;
+    }
+
+    // 3. 접근 권한 잘못됨
+    if (!not_present && write) { // write flag 정확한 의미와, 포함 여부
+        /* TODO(선하): 쓰기 방지 페이지(extra) */
+        return false;
+    }
+
+    // 유효하지 않은 페이지 폴트 -> 해결 가능한(할수도있는) 페이지 폴트
+    // not_present
+    // 일단 spt에 있는지 확인
+    page = spt_find_page(spt, addr);
+
+    // 없는 경우 -> palloc 같은게 선행되지 않음.
+    if (page == NULL) {
+        return false;
+    }
+
+    // 새 프레임을 받아와서 매핑 해주고, swap_in을 해줌 (uninit: 새로운 타입의 페이지로 다시 세팅, other: swap in)
     return vm_do_claim_page(page);
 }
 
@@ -266,8 +301,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
 /* 추가한 함수들 by git book 08.04 */
 /* 페이지의 가상 주소 va를 기반으로 해시값을 만드는 함수 */
 // 해시 테이블은 내부적으로 빠르게 찾기 위해 키(va)를 해시값으로 바꾸어서 저장함.
-unsigned
-page_hash(const struct hash_elem *p_, void *aux UNUSED) {
+unsigned page_hash(const struct hash_elem *p_, void *aux UNUSED) {
   // hash_entry()는 hash_elem 구조체 포인터를 struct page 포인터로 바꿔주는 매크로!
   const struct page *p = hash_entry(p_, struct page, hash_elem);
   return hash_bytes(&p->va, sizeof p->va); // p->va: 페이지의 가상 주소. 가상 주소의 바이트 값을 이용해 해시값을 계산함.
@@ -275,8 +309,7 @@ page_hash(const struct hash_elem *p_, void *aux UNUSED) {
 
 /* 두 페이지의 va 중 어느 게 더 작은지 비교해서 정렬 기준을 정하는 함수 */
 // 해시 테이블 내부에 충돌이 발생하면 비교 함수가 필요함. 같은 해시값일 때 정확히 어떤 페이지인지 비교해서 구분해야 하기 때문.
-bool
-page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
+bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
   // a, b: 각각 해시 테이블에 저장된 페이지들
   // a->va < b->va: 가상 주소 기준으로 비교함. 주소가 더 작은 페이지가 "먼저"라고 판단하는 기준임.
   const struct page *a = hash_entry(a_, struct page, hash_elem);
