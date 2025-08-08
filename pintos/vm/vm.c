@@ -208,7 +208,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     if (USER_STACK <= (uint64_t) addr && (uint64_t) addr < KERN_BASE) { // 부등호 처리 확인하기***
         return false;
     }
-    if (0x0 <= (uint64_t) addr && (uint64_t) addr < 0x400000) { // 이게 맞나...?
+    if (0x0 <= (uint64_t) addr && (uint64_t) addr < 0x400000) { // 차후 변수들로 수정
         return false;
     }
 
@@ -221,7 +221,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     // 유효하지 않은 페이지 폴트 -> 해결 가능한(할수도있는) 페이지 폴트
     // not_present
     // 일단 spt에 있는지 확인
-    page = spt_find_page(spt, addr);
+    page = spt_find_page(spt, pg_round_down(addr)); // 해당 addr가 속해있는 page의 va를 통해 spt를 탐색해야함.
 
     // 없는 경우 -> palloc 같은게 선행되지 않음.
     if (page == NULL) {
