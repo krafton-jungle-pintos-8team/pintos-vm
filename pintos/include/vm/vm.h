@@ -23,7 +23,7 @@ struct thread;
     그리고 또?
 */
 struct frame_table {
-    struct hash frames;
+    struct list frames;
 };
 
 /* The representation of "page".
@@ -56,7 +56,7 @@ struct page {
 struct frame {
     void *kva;
     struct page *page;
-    struct hash_elem hash_elem;
+    struct list_elem list_elem;
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
 };

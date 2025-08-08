@@ -1,10 +1,12 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include <debug.h>
+
 #include "vm/vm.h"
 #include "threads/mmu.h"
-
 #include "threads/malloc.h"
 #include "vm/inspect.h"
+
 
 // 전역, 정적 변수로 프레임 테이블 선언
 static struct frame_table frame_table;
@@ -26,7 +28,7 @@ void vm_init(void) {
     /* TODO: Your code goes here. */
 
     // 프레임 테이블 초기화
-    hash_init(&frame_table->frames);
+    list_init(&frame_table.frames);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -159,13 +161,13 @@ static struct frame *vm_get_frame(void) {
     // 물리 메모리의 공간 할당 및 주소 얻어오기
     void* kva = palloc_get_page(PAL_USER); // user pool이 맞는가?
     if (kva == NULL) {
-        panic("todo");
+        PANIC("todo");
     }
 
     // frame 구조체를 위한 공간 할당 -> 커널 페이지
     frame = malloc(sizeof(struct frame));
     if (frame == NULL) {
-        panic("malloc failed")
+        PANIC("malloc failed");
     }
 
     frame->kva = kva;
@@ -173,7 +175,7 @@ static struct frame *vm_get_frame(void) {
     frame->reference_bit = 1;
 
     // Frame Table에 추가
-    hash_insert(&frame_table.frames, frame->hash_elem);
+    list_push_back(&frame_table.frames, &frame->list_elem);
 
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
@@ -242,13 +244,13 @@ void vm_dealloc_page(struct page *page) {
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED) {
     /* TODO: Fill this function */
-    struct page *page = spt_find_page(thread_current()->spt, va);
+    struct page *page = spt_find_page(&thread_current()->spt, va);
 
     // spt 에 없을 때???
     if (page == NULL) {
         // vm_alloc_page(VM_UNINIT, va, true); // 불가능: uninit 상태의 페이지를 실제 페이지로.
         // spt_insert_page(thread_current()->spt, page);
-        return false
+        return false;
     }
 
     return vm_do_claim_page(page);
