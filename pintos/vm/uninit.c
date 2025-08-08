@@ -8,6 +8,15 @@
  * function.
  * */
 
+/* uninit.c: 초기화되지 않은 페이지 구현
+ *
+ * 모든 페이지는 초기화되지 않은 페이지로 생성됩니다. 첫 페이지 폴트가 발생하면,
+ * 핸들러 체인은 uninit_initialize (page->operations.swap_in)를 호출합니다.
+ * uninit_initialize 함수는 페이지 객체를 초기화하여 페이지를 특정 페이지 객체
+ * (익명, 파일, 페이지 캐시)로 변형(transmute)시키고, vm_alloc_page_with_initializer
+ * 함수로부터 전달받은 초기화 콜백을 호출합니다.
+*/
+
 #include "vm/uninit.h"
 
 #include "vm/vm.h"
