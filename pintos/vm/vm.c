@@ -5,8 +5,9 @@
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 
-unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
-bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+#include "include/lib/debug.h" // 08.07 for PANIC
+
+static struct frame *vm_get_frame(void);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -48,43 +49,36 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
     ASSERT(VM_TYPE(type) != VM_UNINIT)
 
     struct supplemental_page_table *spt = &thread_current()->spt;
-    bool result = false;
     /* Check wheter the upage is already occupied or not. */
     if (spt_find_page(spt, upage) == NULL) {
         /* TODO: 페이지를 생성하고, VM 타입에 따라 초기화 함수를 가져오세요. */
         struct page *page = malloc(sizeof(struct page));
-        struct frame *frame = vm_get_frame();
+
         if (page == NULL) {
             return false;
         }
-        switch (type)
+        switch (VM_TYPE(type))
         {
         /* TODO: 그런 다음 uninit_new를 호출해서 "uninit" 페이지 구조체를 생성하세요. */
         /* TODO: uninit_new를 호출한 이후에는 해당 구조체의 필드를 수정해야 합니다. */
         case VM_ANON:
             /* code */
-            bool initializer = anon_initializer(page, type, frame->kva);
-            if (!initializer)  {
-                return false;
-            }
-            uninit_new(page, page->va, init, type, aux, initializer);
+            uninit_new(page, upage, init, type, aux, anon_initializer); // 함수 포인터
             break;
         case VM_FILE:
-            bool initializer = file_backed_initializer(page, type, frame->kva);
-            if (!initializer)  {
-                return false;
-            }
-            uninit_new(page, page->va, init, type, aux, initializer);
-            break;
-        case VM_PAGE_CACHE:
+            uninit_new(page, upage, init, type, aux, file_backed_initializer); // 함수 포인터
             break;
         default:
-            break;
+            free(page);
+            return false;
         }
+        /* uninit_new 호출 후 writable 설정 왜냐하면 uninit_new에서 page 구조체를 초기화 해주기 때문 */
+        page->writable = writable;
         /* TODO: 생성한 페이지를 SPT(supplemental page table)에 삽입하세요. */
         return spt_insert_page(spt, page);
     }   
 err:
+    
     return false;
 }
 
@@ -167,7 +161,6 @@ palloc()을 사용하여 프레임을 가져옵니다.
 이 함수는 사용 가능한 메모리 공간을 확보하기 위해 프레임을 축출합니다.
 */
 static struct frame *vm_get_frame(void) {
-    struct frame *frame = NULL;
     /* TODO: Fill this function. */
     /*
         1. palloc으로 프레임을 가져온다.
@@ -178,10 +171,11 @@ static struct frame *vm_get_frame(void) {
     */
     
     void *kva = palloc_get_page(PAL_USER);
-    frame = malloc(sizeof(struct frame)); // 자원 해제 필요
+    struct frame *frame = malloc(sizeof(struct frame)); // 자원 해제 필요
+    // struct frame *frame = palloc_get_page(PAL_ASSERT | PAL_ZERO);
     // NULL인 경우 사용 가능한 공간이 없다.
     if (kva == NULL || frame == NULL) {
-        panic("todo");
+        PANIC("todo");
     }
     
     frame->kva = kva;
@@ -205,11 +199,33 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
+        
+    // addr = 0xffffffffffffffff8
+    /* 유저 영역이라면 KERN_BASE 보다 낮은 영역이여야 하는거 아닌가? 정확히 */
+    if (user && is_kernel_vaddr(addr)) {
+        return false;
+    }
+
+    /* wrtie: 쓰기 모드, access 권한 violation
+        페이지는 있는데 읽기 모드라서 violation 발생?
+    */
+    if (write && !not_present) {
+        /*
+            not_present (true): 페이지가 메모리에 없음
+            not_present (false): 이미 페이지가 메모리에 있음
+        */
+        return false;
+    }
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = NULL;
+    struct page *page = spt_find_page(spt, pg_round_down(addr));
     /* TODO: Validate the fault */
+    /* 유효한 주소인지 확인 */
+    if (page == NULL) {
+        return false;
+    }
 
     /* TODO: Your code goes here */
+    /* stack growth 처리해줘야 할 듯. */
 
     return vm_do_claim_page(page);
 }
@@ -230,16 +246,13 @@ bool vm_claim_page(void *va UNUSED) {
         해당 페이지에 프레임 할당
         한 페이지를 얻어야 하고,
         그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
-        
-        uninit 페이지를 만들어준다
-        uninit를 사용한다?
     */
-    struct page *page = spt_find_page(curr->spt, va);
+    struct page *page = spt_find_page(&curr->spt, va);
+
     if (page == NULL) {
         return false;
     }
     
-    // spt_find_page(, va);
     return vm_do_claim_page(page);
 }
 
@@ -250,6 +263,9 @@ bool vm_claim_page(void *va UNUSED) {
 */
 static bool vm_do_claim_page(struct page *page) {
     struct frame *frame = vm_get_frame();
+    if (frame == NULL) {
+        return false;
+    }
     struct thread *curr = thread_current();
     /*
         1. 페이지에 물리 프레임을 할당
@@ -262,7 +278,7 @@ static bool vm_do_claim_page(struct page *page) {
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
     // 가상 주소와 물리 주소를 매핑한 정보를 페이지 테이블에 추가해야 한다.
-    pml4_set_page(curr->pml4, page->va, frame->kva, 0);
+    pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
 
     return swap_in(page, frame->kva);
 }

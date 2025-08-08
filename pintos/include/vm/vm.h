@@ -25,8 +25,8 @@ struct thread;
     그래서 변하지 않는 고유한 값인 kva라고 생각?
 */
 struct frame_table {
-    struct hash frames;
-    // void *kva;
+    struct list frames;
+    void *kva; // key 값
 };
 
 /* The representation of "page".
@@ -40,6 +40,7 @@ struct page {
 
     /* Your implementation */
     struct hash_elem hash_elem;
+    bool writable;         /* 읽기 전용 or 읽기/쓰기 */
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
@@ -59,15 +60,15 @@ struct frame {
     void *kva;
     struct page *page;
     // list를 순회하기 위해 elem이 필요할 것 같은데 hash? list?
-    struct list_elem elem;
+    struct hash_elem elem;
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
 };
 
-/* The function table for page operations.
- * This is one way of implementing "interface" in C.
- * Put the table of "method" into the struct's member, and
- * call it whenever you needed. */
+/* 페이지 작업을 위한 함수 테이블입니다.
+이것은 C에서 "인터페이스"를 구현하는 한 가지 방법입니다.
+구조체의 멤버로 메서드(함수) 테이블을 넣고,
+필요할 때마다 해당 함수를 호출하면 됩니다. */
 struct page_operations {
     bool (*swap_in)(struct page *, void *);
     bool (*swap_out)(struct page *);
@@ -107,5 +108,9 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 void vm_dealloc_page(struct page *page);
 bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
+
+/* 여기로 옮겨서 사용해야 하나 for anon.c 08.08 */
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
 #endif /* VM_VM_H */
