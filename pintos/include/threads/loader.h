@@ -1,17 +1,17 @@
 #ifndef THREADS_LOADER_H
 #define THREADS_LOADER_H
 
-/* Constants fixed by the PC BIOS. */
-#define LOADER_BASE 0x7c00 /* Physical address of loader's base. */
-#define LOADER_END 0x7e00  /* Physical address of end of loader. */
+/* Constants fixed by the PC BIOS. */ // PC BIOS에 의해 고정된 상수들.
+#define LOADER_BASE 0x7c00 /* Physical address of loader's base. */ // 로더의 시작 물리 주소.
+#define LOADER_END 0x7e00  /* Physical address of end of loader. */ // 로더의 끝 물리 주소.
 
 /* Physical address of kernel base. */
-#define LOADER_KERN_BASE 0x8004000000
+#define LOADER_KERN_BASE 0x8004000000   // 커널의 시작 물리 주소.
 
 /* Kernel virtual address at which all physical memory is mapped. */
-#define LOADER_PHYS_BASE 0x200000
+#define LOADER_PHYS_BASE 0x200000       // 모든 물리 메모리가 매핑되는 커널 가상 주소.
 
-/* Multiboot infos */
+/* Multiboot infos */ // 멀티부트 정보
 #define MULTIBOOT_INFO 0x7000
 #define MULTIBOOT_FLAG MULTIBOOT_INFO
 #define MULTIBOOT_MMAP_LEN MULTIBOOT_INFO + 44
@@ -20,12 +20,12 @@
 #define E820_MAP MULTIBOOT_INFO + 52
 #define E820_MAP4 MULTIBOOT_INFO + 56
 
-/* Important loader physical addresses. */
+/* Important loader physical addresses. */  // 중요한 로더 물리 주소들.
 #define LOADER_SIG (LOADER_END - LOADER_SIG_LEN)          /* 0xaa55 BIOS signature. */
 #define LOADER_ARGS (LOADER_SIG - LOADER_ARGS_LEN)        /* Command-line args. */
 #define LOADER_ARG_CNT (LOADER_ARGS - LOADER_ARG_CNT_LEN) /* Number of args. */
 
-/* Sizes of loader data structures. */
+/* Sizes of loader data structures. */  // 로더 데이터 구조체들의 크기.
 #define LOADER_SIG_LEN 2
 #define LOADER_ARGS_LEN 128
 #define LOADER_ARG_CNT_LEN 4
