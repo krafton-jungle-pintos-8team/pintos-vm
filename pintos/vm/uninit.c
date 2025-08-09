@@ -24,26 +24,27 @@ static const struct page_operations uninit_ops = {
 };
 
 /* DO NOT MODIFY this function */
+/* lazy loading을 위해 미리 페이지의 정보를 설정해두는 것 */
 void uninit_new(struct page *page, void *va, vm_initializer *init, enum vm_type type, void *aux,
                 bool (*initializer)(struct page *, enum vm_type, void *)) {
     ASSERT(page != NULL);
 
     *page = (struct page){.operations = &uninit_ops,
-                          .va = va,
-                          .frame = NULL, /* no frame for now */
+                          .va = va,                         // upage
+                          .frame = NULL,                    /* no frame for now */
                           .uninit = (struct uninit_page){
-                              .init = init,
-                              .type = type,
-                              .aux = aux,
+                              .init = init,                 // lazy_load_segment
+                              .type = type,                 // type
+                              .aux = aux,                   // 파일 정보 구조체
                               .page_initializer = initializer,
                           }};
 }
 
-/* Initalize the page on first fault */
+/* 첫 번째 오류 발생 시 페이지를 초기화합니다. */
 static bool uninit_initialize(struct page *page, void *kva) {
     struct uninit_page *uninit = &page->uninit;
 
-    /* Fetch first, page_initialize may overwrite the values */
+    /* 먼저 값을 가져오세요. page_initialize가 그 값들을 덮어쓸 수 있습니다. */
     vm_initializer *init = uninit->init;
     void *aux = uninit->aux;
 
