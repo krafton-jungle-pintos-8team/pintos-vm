@@ -52,12 +52,33 @@ static bool uninit_initialize(struct page *page, void *kva) {
     return uninit->page_initializer(page, uninit->type, kva) && (init ? init(page, aux) : true);
 }
 
-/* Free the resources hold by uninit_page. Although most of pages are transmuted
- * to other page objects, it is possible to have uninit pages when the process
- * exit, which are never referenced during the execution.
- * PAGE will be freed by the caller. */
+/* 
+    uninit_page가 가지고 있는 자원을 해제하세요.
+    대부분의 페이지는 다른 페이지 객체로 변환되지만,
+    프로세스가 종료될 때까지 한 번도 참조되지 않은 uninit 페이지가 남아 있을 수도 있습니다.
+    페이지 자체(PAGE)는 호출자가 해제합니다.
+ */
 static void uninit_destroy(struct page *page) {
     struct uninit_page *uninit UNUSED = &page->uninit;
     /* TODO: Fill this function.
      * TODO: If you don't have anything to do, just return. */
+
+    /* 
+        1차원적인 방법 모든 자원을 NULL로 바꿔준다. 
+        얘는 물리 메모리에 올라간 친구는 아니라 free는 필요없을거 같은데
+        
+        어떻게 자원을 해제하지?
+        
+        free해줄 데이터를 가장 먼저 처리를 해줘야 한다?
+    */
+   
+    free(uninit->aux);
+    free(uninit->init);
+    // free(uninit->page_initializer);
+    // free(uninit);
+    // uninit->aux = NULL;
+    // uninit->init = NULL;
+    // uninit->page_initializer = NULL;
+    // uninit->type = 0;
+    // /* 무슨 함수가 있을거 같은데...음 */
 }

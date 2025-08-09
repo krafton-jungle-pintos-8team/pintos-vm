@@ -1,14 +1,17 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "vm/vm.h"
-#include "include/threads/mmu.h"
+#include "threads/mmu.h"
 #include "threads/malloc.h"
 #include "vm/inspect.h"
+#include "lib/string.h"
 
 #include "include/lib/debug.h" // 08.07 for PANIC
 
+#define USER_PROTECTION_AREA 0x400000 // 08.09
+
 static struct frame *vm_get_frame(void);
-struct frame_table ft;
+static struct frame_table ft;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -21,10 +24,8 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
-    
-
-    // 프레임 테이블 초기화
-    list_init(&ft.frames);
+    /* frame table 초기화 함수 08.09 */
+    list_init(&ft);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -208,8 +209,8 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
-        
-    // addr = 0xffffffffffffffff8
+    ASSERT(addr > USER_PROTECTION_AREA);
+
     /* 유저 영역이라면 KERN_BASE 보다 낮은 영역이여야 하는거 아닌가? 정확히 */
     if (user && is_kernel_vaddr(addr)) {
         return false;
@@ -324,12 +325,82 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
 
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED) {}
+                                  struct supplemental_page_table *src UNUSED) {
+    /* 
+    당신은 초기화되지않은(uninit) 페이지를 할당하고
+    - vm_alloc_page_with_initializer()
+    그것들을 바로 요청할 필요가 있을 것입니다.
+    - vm_claim_page()
+
+    정확한 복사본을 만드세요.
+    */
+   
+    /* dst init 초기화 */
+    supplemental_page_table_init(dst);
+
+    struct hash_iterator hash_iter;
+    hash_first(&hash_iter, &src->pages);
+
+    while (hash_next(&hash_iter)) {
+        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+        if (page != NULL) {
+            /*
+                근데 분기를 나눌 필요가 있는가 왜냐하면
+                operation->destory를 사용하면 타입에 알맞은 destory가 사용될거 같은데
+            */ 
+            if (page->operations->type == VM_UNINIT) {
+                // 분기를 나눴는데 VM_UNINIT 일때랑 // vm_alloc_page_with_initializer 대신에 vm_alloc_page를 사용할 수 있지 않나?
+                vm_alloc_page(page->operations->type, page->va, page->writable); // 초기화되지 않은 uninit 페이지를 할당한다.
+                vm_claim_page(page->va); // 가상 메모리 점유
+            }
+            else if (page->operations->type == VM_ANON) {
+                // VM_ANON 일 때 어떻게 구분하지? 직접 복사? 직접 복사란 memcpy를 써야하나?
+                // memcpy(&dst->pages, &src->pages, sizeof(struct hash *));
+                dst->pages = src->pages;
+            }
+            // else if (page->operations->type == VM_FILE) {
+            //     // 이건 나중에 할 일 // lazy-load 설정 복사
+            // }
+        }
+        hash_next(&hash_iter);
+    }
+    /* 2. 복사한 페이지를 dst에 넣는다. */
+}
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
+    /* 
+        무엇을 날려야 하는가?
+        일단 thread->spt = null 처리해야 하는데
+        그러기 위해서는 만들어준 pages를 모두 free 해줘야 할 듯
+
+        1.
+        vm_dealloc_page()라는 함수가 있음.
+        여기서는 destroy(page)를 호출하여 page에 있는 operation을 지우고
+        type도 날리나? 모르겠네...
+
+        그럼 그냥 반복문 돌면서 dealloc_page 해주면 되는거 아님??
+
+        2.
+        hash_destroy() 함수 사용하면 될거 같기도
+    */
+   
+    // hash_clear(&spt->pages, hash_clear);
+    
+    struct hash_iterator hash_iter;
+    hash_first(&hash_iter, &spt->pages);
+
+    /* 1. 페이지 먼저 할당 해제 해준 후 */
+    while (hash_next(&hash_iter)) {
+        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+        /* hash_delete를 사용했을 때 안됬음 08.09 20:00 */
+        // hash_delete(&spt->pages, &page->hash_elem);
+        destroy(page);
+        hash_next(&hash_iter);
+    }
+    /* 2. hash 제거 해주기 for spt */    
 }
 
 /* 추가한 함수들 by git book 08.04 */
