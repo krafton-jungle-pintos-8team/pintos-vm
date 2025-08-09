@@ -268,7 +268,8 @@ static void argument_stack(char **argv, int argc, struct intr_frame *if_, void *
 
     // 3. argv 배열 저장 (역순)
     if_->rsp -= sizeof(char *);
-    *(uint64_t *)if_->rsp = 0;  // argv[argc] (NULL)
+    memset(if_->rsp, 0, sizeof(char *));
+    // *(uint64_t *)if_->rsp = 0;  // argv[argc] (NULL)
 
     for (int i = argc - 1; i >= 0; i--) {
         if_->rsp -= sizeof(char *);
@@ -527,10 +528,11 @@ struct ELF64_PHDR {
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
 
-static bool setup_stack(struct intr_frame *if_);
 static bool validate_segment(const struct Phdr *, struct file *);
+static bool lazy_load_segment(struct page *page, void *aux); // 08.07
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
-                         uint32_t zero_bytes, bool writable);
+                         uint32_t zero_bytes, bool writable); // 08.07
+static bool setup_stack(struct intr_frame *if_); // 08.07
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
@@ -715,7 +717,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
                          uint32_t zero_bytes, bool writable) {
     ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
     ASSERT(pg_ofs(upage) == 0);
-    ASSERT(ofs % PGSIZE == 0);
+    ASSERT(ofs % PGSIZE == 0); /* 여기서 read-normal PANIC 발생 08.08 */
 
     file_seek(file, ofs);
     while (read_bytes > 0 || zero_bytes > 0) {
@@ -786,30 +788,59 @@ static bool install_page(void *upage, void *kpage, bool writable) {
             pml4_set_page(t->pml4, upage, kpage, writable));
 }
 #else
+/* define VM 하면서 install_page가 없어져서 위에서 가져옴 08.07 */
+static bool install_page(void *upage, void *kpage, bool writable) {
+    struct thread *t = thread_current();
+
+    /* Verify that there's not already a page at that virtual
+     * address, then map our page there. */
+    return (pml4_get_page(t->pml4, upage) == NULL &&
+            pml4_set_page(t->pml4, upage, kpage, writable));
+}
+
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
-
 static bool lazy_load_segment(struct page *page, void *aux) {
     /* TODO: Load the segment from the file */
+    struct file_info *file_info = aux;
+    struct file *file = file_info->file;
+    off_t ofs = file_info->ofs;
+    uint8_t *upage = file_info->upage;
+    uint32_t read_bytes = file_info->read_bytes;
+    uint32_t zero_bytes = file_info->zero_bytes;
+
+    /* 여기서 문제 발생 08.08 ASSERT 없애보기 */
+    ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+    ASSERT(pg_ofs(upage) == 0);
+    ASSERT(ofs % PGSIZE == 0);
+
+    file_seek(file, ofs);
     /* TODO: This called when the first page fault occurs on address VA. */
     /* TODO: VA is available when calling this function. */
+    /* Load this page. */
+    if (file_read(file, upage, read_bytes) != (int)read_bytes) {
+        free(upage);
+        return false;
+    }
+    memset(upage + read_bytes, 0, zero_bytes);
+    return true;
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
- * UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
- * memory are initialized, as follows:
- *
- * - READ_BYTES bytes at UPAGE must be read from FILE
- * starting at offset OFS.
- *
- * - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
- *
- * The pages initialized by this function must be writable by the
- * user process if WRITABLE is true, read-only otherwise.
- *
- * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */
+/* 
+파일의 오프셋 OFS에서 시작하는 세그먼트를 UPAGE 주소에 적재합니다.
+READ_BYTES + ZERO_BYTES 바이트의 가상 메모리가 다음과 같이 초기화됩니다:
+UPAGE에 있는 READ_BYTES는 파일에서 읽어야 한다.
+- offset OFS에서부터 읽기 시작
+
+ZERO_BYTES 바이트는 UPAGE + READ_BYTES 위치부터 0으로 초기화되어야 합니다.
+
+이 함수에 의해 초기화된 페이지는 WRITABLE이 true인 경우 사용자 프로세스가 쓸 수 있어야 하며,
+그렇지 않은 경우 읽기 전용이어야 합니다.
+
+메모리 할당 오류나 디스크 읽기 오류가 발생하지 않으면 true를 반환하고,
+그런 오류가 발생하면 false를 반환합니다.
+*/
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable) {
     ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
@@ -822,13 +853,21 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
          * and zero the final PAGE_ZERO_BYTES bytes. */
         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-        /* TODO: Set up aux to pass information to the lazy_load_segment. */
-        void *aux = NULL;
+  
+        /* TODO: Set up aux to pass information to the lazy_load_segment. */        
+        /* 덮어 쓰여질 가능성이 있어 루프를 돌며 새로운 주소를 생성하여 넘긴다. */
+        struct file_info *aux = malloc(sizeof(struct file_info)); 
+        aux->file = file;
+        aux->ofs = ofs;
+        aux->read_bytes = page_read_bytes;
+        aux->zero_bytes = page_zero_bytes;
+        aux->upage = upage;
+        
         if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, aux))
             return false;
 
         /* Advance. */
+        ofs += page_read_bytes; /* ofs를 page_read_bytes 만큼 계속 추가 해준다. 08.08 */
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         upage += PGSIZE;
@@ -839,13 +878,23 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_) {
     bool success = false;
-    void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
+    void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE); // 1 페이지 사이즈(4KB)를 미리 할당을 위함
+    struct thread *curr = thread_current();
+    
+    /* TODO: stack_bottom 위치에 스택을 매핑하고, 즉시 해당 페이지를 claim하세요. */
+    success = vm_alloc_page_with_initializer(VM_ANON | VM_MARKER_0, stack_bottom, true, NULL, NULL);
+    if (!success) {
+        return false;
+    }
+    success = vm_claim_page(stack_bottom);
 
-    /* TODO: Map the stack on stack_bottom and claim the page immediately.
-     * TODO: If success, set the rsp accordingly.
-     * TODO: You should mark the page is stack. */
-    /* TODO: Your code goes here */
-
-    return success;
+    /* TODO: 성공했다면, rsp 값을 그에 맞게 설정하세요. */
+    /* TODO: 해당 페이지를 스택으로 표시해야 합니다. */
+    /* TODO: 여기에 당신의 코드를 작성하세요. */
+    if (success) {
+        if_->rsp = USER_STACK;
+        return true;
+    }
+    return false;
 }
 #endif /* VM */

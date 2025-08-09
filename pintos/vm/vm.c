@@ -7,16 +7,11 @@
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 
-
-// 전역, 정적 변수로 프레임 테이블 선언
-static struct frame_table frame_table;
-
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
-// 메인에서 1번만 호출되는, vm_system을 초기화하는 함수기 때문에, 전역으로 한번만 초기화 되어야하는 frame table도 여기서 init.
 void vm_init(void) {
     vm_anon_init();
     vm_file_init();
@@ -27,8 +22,9 @@ void vm_init(void) {
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
 
+
     // 프레임 테이블 초기화
-    list_init(&frame_table.frames);
+    list_init(&ft.frames);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -49,16 +45,12 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 
-/* Create the pending page object with initializer. If you want to create a
- * page, do not create it directly and make it through this function or
- * `vm_alloc_page`. */
-/*
- * 초기화 함수를 사용하여 보류 중인 페이지 객체를 생성합니다. 페이지를 생성하려면 직접 생성하지 말고,
- * 이 함수 또는 vm_alloc_page를 통해 생성해야 합니다.
- */
+/* 초기화 함수를 사용해 **대기 중인 페이지 객체(pending page object)**를 생성한다.
+만약 페이지를 생성하고 싶다면, 직접 생성하지 말고 이 함수나 vm_alloc_page를 통해 만들어야 한다. */
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
 
+    // 메모리를 실제로 할당하지 않고, 초기화할 페이지가 필요하다고 등록만 한다.
     ASSERT(VM_TYPE(type) != VM_UNINIT);
 
     struct supplemental_page_table *spt = &thread_current()->spt;
@@ -119,7 +111,6 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *pa
     if (hash_insert(&spt->pages, &page->hash_elem) != NULL) {
         return false;
     }
-
     return true;
 }
 
@@ -155,11 +146,17 @@ palloc()을 사용하여 프레임을 가져옵니다.
 이 함수는 사용 가능한 메모리 공간을 확보하기 위해 프레임을 축출합니다.
 */
 static struct frame *vm_get_frame(void) {
-    struct frame *frame = NULL;
     /* TODO: Fill this function. */
+    /*
+        1. palloc으로 프레임을 가져온다.
+        2. 사용 가능한 페이지가 없다? (메모리가 부족한 경우)
+            - 사용자 풀의 공간이 모두 할당되었다는 의미인가?
+            - 그럼 page fault가 발생할거 같음.
+        3. 프레임 축출(evict policy 축출 정책)을 사용하여 페이지 축출
+    */
 
     // 물리 메모리의 공간 할당 및 주소 얻어오기
-    void* kva = palloc_get_page(PAL_USER); // user pool이 맞는가?
+    void* kva = palloc_get_page(PAL_USER);
     if (kva == NULL) {
         PANIC("todo");
     }
@@ -167,18 +164,20 @@ static struct frame *vm_get_frame(void) {
     // frame 구조체를 위한 공간 할당 -> 커널 페이지
     frame = malloc(sizeof(struct frame));
     if (frame == NULL) {
-        PANIC("malloc failed");
+        PANIC("todo");
     }
 
     frame->kva = kva;
     frame->page = NULL;
     frame->reference_bit = 1;
 
-    // Frame Table에 추가
-    list_push_back(&frame_table.frames, &frame->list_elem);
-
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
+
+    // 4. 프레임 테이블에 등록
+    list_push_back(&ft.frames, &frame->elem);
+
+    // 5. 프레임 반환
     return frame;
 }
 
@@ -242,14 +241,29 @@ void vm_dealloc_page(struct page *page) {
 }
 
 /* Claim the page that allocate on VA. */
+/* 주어진 가상 주소 va에 해당하는 페이지를 생성하고, 그 페이지에 물리 프레임을 할당하는 함수 */
 bool vm_claim_page(void *va UNUSED) {
     /* TODO: Fill this function */
+    /*
+        va에 페이지 할당
+        해당 페이지에 프레임 할당
+        한 페이지를 얻어야 하고,
+        그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
+    */
+
+    // 1. va를 기준으로 해당 가상 페이지가 존재하는지 확인
     struct page *page = spt_find_page(&thread_current()->spt, va);
 
-    // spt 에 없을 때???
+    // 2. 만약 존재하지 않으면 실패
     if (page == NULL) {
-        // vm_alloc_page(VM_UNINIT, va, true); // 불가능: uninit 상태의 페이지를 실제 페이지로.
-        // spt_insert_page(thread_current()->spt, page);
+      return false;
+    }
+
+    // 3. 물리 메모리 프레임을 할당하고, 해당 프레임과 페이지를 연결하며 MMU 설정
+    struct page *page = spt_find_page(&thread_current()->spt, va);
+
+    // spt 에 없을 때
+    if (page == NULL) {
         return false;
     }
 
@@ -257,18 +271,29 @@ bool vm_claim_page(void *va UNUSED) {
 }
 
 /* Claim the PAGE and set up the mmu. */
+/*
+    실제 메모리의 물리 프레임과 가상 주소를 연결하는 것
+    이건 운영체제가 MMU를 통해 CPU가 주소를 해석할 수 있게 해주는 작업
+*/
 static bool vm_do_claim_page(struct page *page) {
     // 물리 프레임 가져오기
     struct frame *frame = vm_get_frame();
+    if (frame == NULL) {
+        return false;
+    }
+    struct thread *curr = thread_current();
 
     /* Set links */
     frame->page = page;
     page->frame = frame;
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
-    // rw 세팅 값 -> 페이지에 writable 값을 추가하고 그걸 참조.
-    pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable);
+    // 페이지 테이블에 VA -> PA 매핑.
+    if(!pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable)){
+        return false;
+    }
 
+    // swap_in으로 실제 데이터를 프레임에 채움
     return swap_in(page, frame->kva);
 }
 
@@ -285,7 +310,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
     - page_less: 가상 주소를 기준으로 두 페이지를 비교하는 함수
     - NULL: 필요하면 추가 정보 전달(여기선 안 씀)
 
-    -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주[소 기준으로 페이지 정보 저장/검색 가능해짐.
+    -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주소 기준으로 페이지 정보 저장/검색 가능해짐.
   */
   hash_init(&spt->pages, page_hash, page_less, NULL);
 }
