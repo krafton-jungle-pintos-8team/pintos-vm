@@ -37,6 +37,7 @@ struct page {
     const struct page_operations *operations;
     void *va;              /* 사용자 공간의 주소 */
     struct frame *frame;   /* 해당 프레임에 대한 역참조 */
+    bool writable;         /* 페이지의 쓰기 가능 여부 */
 
     /* Your implementation */
     struct hash_elem hash_elem;
@@ -57,12 +58,11 @@ struct page {
 /* The representation of "frame" */
 /* 프레임 관리 인터페이스를 구현하는 과정에서 더 많은 멤버를 추가해도 됩니다. */
 struct frame {
-    void *kva;
-    struct page *page;
-    // list를 순회하기 위해 elem이 필요할 것 같은데 hash? list?
-    struct hash_elem elem;
+    void *kva; // 커널 가상 주소
+    struct page *page; // 이 프레임을 사용하는 가상 페이지 (역참조)
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
+    struct list_elem elem; // 프레임 테이블에 넣기 위한 리스트 요소
 };
 
 /* 페이지 작업을 위한 함수 테이블입니다.

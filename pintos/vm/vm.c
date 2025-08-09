@@ -8,6 +8,7 @@
 #include "include/lib/debug.h" // 08.07 for PANIC
 
 static struct frame *vm_get_frame(void);
+struct frame_table ft;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -21,6 +22,9 @@ void vm_init(void) {
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
     
+
+    // 프레임 테이블 초기화
+    list_init(&ft.frames);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -169,7 +173,7 @@ static struct frame *vm_get_frame(void) {
             - 그럼 page fault가 발생할거 같음.
         3. 프레임 축출(evict policy 축출 정책)을 사용하여 페이지 축출
     */
-    
+
     void *kva = palloc_get_page(PAL_USER);
     struct frame *frame = malloc(sizeof(struct frame)); // 자원 해제 필요
     // struct frame *frame = palloc_get_page(PAL_ASSERT | PAL_ZERO);
@@ -187,6 +191,11 @@ static struct frame *vm_get_frame(void) {
     /* TODO: swap out */
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
+
+    // 4. 프레임 테이블에 등록
+    list_push_back(&ft.frames, &frame->elem);
+
+    // 5. 프레임 반환
     return frame;
 }
 
@@ -237,9 +246,10 @@ void vm_dealloc_page(struct page *page) {
     free(page);
 }
 
-/* 가상 주소 VA에 할당된(되도록 할) 페이지를 점유한다. (일종의 예약 및 확보) */
+
+/* Claim the page that allocate on VA. */
+/* 주어진 가상 주소 va에 해당하는 페이지를 생성하고, 그 페이지에 물리 프레임을 할당하는 함수 */
 bool vm_claim_page(void *va UNUSED) {
-    struct thread *curr = thread_current();
     /* TODO: Fill this function */
     /* 
         va에 페이지 할당
@@ -247,12 +257,16 @@ bool vm_claim_page(void *va UNUSED) {
         한 페이지를 얻어야 하고,
         그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
     */
-    struct page *page = spt_find_page(&curr->spt, va);
-
-    if (page == NULL) {
-        return false;
-    }
     
+    // 1. va를 기준으로 해당 가상 페이지가 존재하는지 확인
+    struct page *page = spt_find_page(&thread_current()->spt, va);
+
+    // 2. 만약 존재하지 않으면 실패
+    if (page == NULL) {
+      return false;
+    }
+
+    // 3. 물리 메모리 프레임을 할당하고, 해당 프레임과 페이지를 연결하며 MMU 설정
     return vm_do_claim_page(page);
 }
 
@@ -272,14 +286,21 @@ static bool vm_do_claim_page(struct page *page) {
         2. vm_get_frame을 호출하여 프레임을 확보한 뒤, MMU 설정
         3. 가상 주소 -> 물리 주소 매핑, 매핑 성공 여부 반환
     */
-    /* Set links */
+    /* 프레임과 페이지 연결 */
     frame->page = page;
     page->frame = frame;
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
-    // 가상 주소와 물리 주소를 매핑한 정보를 페이지 테이블에 추가해야 한다.
-    pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
+    // 페이지 테이블에 VA -> PA 매핑
+    if(!pml4_set_page(curr->pml4, 
+                  page->va, // 가상 주소
+                  frame->kva, // 물리 주소
+                  page->writable)) // 쓰기 가능 여부
+    {
+      return false;
+    }
 
+    // swap_in으로 실제 데이터를 프레임에 채움
     return swap_in(page, frame->kva);
 }
 
