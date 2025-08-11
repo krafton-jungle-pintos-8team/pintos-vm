@@ -10,6 +10,8 @@
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
 
+static struct frame_table ft;
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void vm_init(void) {
@@ -21,7 +23,6 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
-
 
     // 프레임 테이블 초기화
     list_init(&ft.frames);
@@ -62,7 +63,23 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
          * TODO: should modify the field after calling the uninit_new. */
 
         /* TODO: Insert the page into the spt. */
+        struct page *page = malloc(sizeof(struct page));
+        if (type == VM_ANON) {
+            uninit_new(page, upage, init, type, aux, anon_initializer);
+            page->writable = writable;
+        }
+        else if (type == VM_FILE){
+            uninit_new(page, upage, init, type, aux, file_backed_initializer);
+            page->writable = writable;
+        }
+
+        /* TODO: Insert the page into the spt. */
+
+        if (!spt_insert_page(spt, page)) {
+            goto err;
+        }
     }
+    return true;
 err:
     return false;
 }
@@ -156,13 +173,13 @@ static struct frame *vm_get_frame(void) {
     */
 
     // 물리 메모리의 공간 할당 및 주소 얻어오기
-    void* kva = palloc_get_page(PAL_USER);
+    void *kva = palloc_get_page(PAL_USER);
     if (kva == NULL) {
         PANIC("todo");
     }
 
     // frame 구조체를 위한 공간 할당 -> 커널 페이지
-    frame = malloc(sizeof(struct frame));
+    struct frame *frame = malloc(sizeof(struct frame));
     if (frame == NULL) {
         PANIC("todo");
     }
@@ -206,7 +223,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     }
 
     // 2. 사용자 영역 내에서 invalid 한 영역에 접근
-    if (USER_STACK <= (uint64_t) addr && (uint64_t) addr < KERN_BASE) { // 부등호 처리 확인하기***
+    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) { // 부등호 처리 확인하기***
         return false;
     }
     if (0x0 <= (uint64_t) addr && (uint64_t) addr < 0x400000) { // 차후 변수들로 수정
@@ -250,19 +267,10 @@ bool vm_claim_page(void *va UNUSED) {
         한 페이지를 얻어야 하고,
         그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
     */
-
     // 1. va를 기준으로 해당 가상 페이지가 존재하는지 확인
     struct page *page = spt_find_page(&thread_current()->spt, va);
 
     // 2. 만약 존재하지 않으면 실패
-    if (page == NULL) {
-      return false;
-    }
-
-    // 3. 물리 메모리 프레임을 할당하고, 해당 프레임과 페이지를 연결하며 MMU 설정
-    struct page *page = spt_find_page(&thread_current()->spt, va);
-
-    // spt 에 없을 때
     if (page == NULL) {
         return false;
     }
