@@ -7,6 +7,8 @@
 #include "lib/string.h"
 
 #include "include/lib/debug.h" // 08.07 for PANIC
+#include "vm/file.h" // Add this line to define struct file_info
+#include "userprog/process.h" // for struct file_info (만든 것) 08.12
 
 #define USER_PROTECTION_AREA 0x400000 // 08.09
 
@@ -328,34 +330,30 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 
         if (VM_TYPE(type) == VM_UNINIT) {
             // 이 시점에서는 해당 페이지가 실제로 로드되지 않은 상태이므로, init 함수 포인터와 aux 데이터까지 같이 넘겨서 그대로 복제합니다.
-            if (!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, page->uninit.aux)) {
+            struct file_info *fi = malloc(sizeof(struct file_info));
+            memcpy(fi, page->uninit.aux, sizeof(struct file_info));
+            if (!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, fi)) {
                 return false;
             }
         }
         else {
             /*
-                dst SPT에 새 struct page 생성 + 삽입
-                이게 어떻게 생성하고 삽입했다는건데....도무지 이해가 안가는데?
-                새 page를 dst에 넣는다.
-                근데 dst에 관련된건 없다.
+                vm_alloc_page에서는 thread_current()->spm를 사용하기 때문에
+                dst에 new page를 추가한다.
             */ 
             if (!vm_alloc_page(type, page->va, page->writable)) {
                 return false;
             }
             
-            /* 이것도 page->va를 물리 프레임에 할당하는거지 dst는 전혀 관계 없잖아? 
-                그 page에 물리 프레임 할당
+            /* 
+                vm_claim_page에서도 thread_current()->spt를 사용하기에,
+                위에 추가된 page->va를 물리 프레임에 할당한다.
             */
             if (!vm_claim_page(page->va)) {
                 return false;
             }
-
-            /* 
-            그 page->frame->kva, page->frame->kva 으로 memcpy되어야 하는거 아닌가?
-            */
-
-            /* 생성한 페이지가 dst SPT에 들어가 있다? */
             struct page *c_page = spt_find_page(dst, page->va);
+            /* 실제 물리 메모리: kva, 실ㅈ레 데이터 복사 (4KB) */
             memcpy(c_page->frame->kva, page->frame->kva, PGSIZE);   
         }
     }
@@ -366,19 +364,19 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
-    struct hash_iterator hash_iter;
-    hash_first(&hash_iter, &spt->pages);
+    // struct hash_iterator hash_iter;
+    // hash_first(&hash_iter, &spt->pages);
 
-    /* 1. 페이지 먼저 할당 해제 해준 후 */
-    while (hash_next(&hash_iter)) {
-        /* iterator를 사용하므로써 계속 destroy 되어 PANIC이 발생한다. 08.10 */
-        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
-        /* hash_delete를 사용했을 때 안됬음 08.09 20:00 */
-        // hash_delete(&spt->pages, &page->hash_elem);
-        if (page->va >= USER_PROTECTION_AREA) {
-            destroy(page);    
-        }
-    }
+    // /* 1. 페이지 먼저 할당 해제 해준 후 */
+    // while (hash_next(&hash_iter)) {
+    //     /* iterator를 사용하므로써 계속 destroy 되어 PANIC이 발생한다. 08.10 */
+    //     struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+    //     /* hash_delete를 사용했을 때 안됬음 08.09 20:00 */
+    //     // hash_delete(&spt->pages, &page->hash_elem);
+    //     if (page->va >= USER_PROTECTION_AREA) {
+    //         destroy(page);    
+    //     }
+    // }
 }
 
 /* 추가한 함수들 by git book 08.04 */

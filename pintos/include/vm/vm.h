@@ -28,6 +28,15 @@ struct frame_table {
     struct list frames;
 };
 
+/* lazy load segment에서 사용할 추가 구조체 08.07 */
+struct file_info {
+    struct file *file;
+    off_t ofs;
+    uint8_t *upage;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
+};
+
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
  * uninit_page, file_page, anon_page, and page cache (project4).
