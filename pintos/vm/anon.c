@@ -48,21 +48,8 @@ static bool anon_swap_out(struct page *page) {
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
     /* 
-        이 값들을 destory 하기 위한 방법...음 
-        1. 밑에 처럼 모든 값들을 NULL 처리 해준다.
-        2. free 해준다 아마 주소값을 넘기기 때문에 free 해주는게 좋을거 같은데...
+        kva는 do_claim_page에서 get_frame으로 frame을 받아오는데,
+        이때 frame의 kva 유저풀 주소가 palloc으로 할당된다. 08.10
     */
     struct anon_page *anon_page = &page->anon;
-    // anon_page->kva = NULL;
-    free(anon_page->kva);
-    free(anon_page);
-    /* 왜 free 하니까 error 발생하지? 08.09 */
-    // free(anon_page);
-    /* 구현을 해줘야 하는거 같음 */
-    /* 1차원적인 방법 모든 자원을 NULL로 바꿔준다. */
-    
-    // anon_page->type = 0;
-    // anon_page = NULL;
-    /* anon_page 이 page 포인터 자체도 free 해줘야 하는거 아닌가? */
-    
 }

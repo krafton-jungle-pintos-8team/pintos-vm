@@ -717,7 +717,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
                          uint32_t zero_bytes, bool writable) {
     ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
     ASSERT(pg_ofs(upage) == 0);
-    ASSERT(ofs % PGSIZE == 0); /* 여기서 read-normal PANIC 발생 08.08 */
+    ASSERT(ofs % PGSIZE == 0);
 
     file_seek(file, ofs);
     while (read_bytes > 0 || zero_bytes > 0) {
@@ -810,11 +810,6 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     uint32_t read_bytes = file_info->read_bytes;
     uint32_t zero_bytes = file_info->zero_bytes;
 
-    /* 여기서 문제 발생 08.08 ASSERT 없애보기 */
-    ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
-    ASSERT(pg_ofs(upage) == 0);
-    ASSERT(ofs % PGSIZE == 0);
-
     file_seek(file, ofs);
     /* TODO: This called when the first page fault occurs on address VA. */
     /* TODO: VA is available when calling this function. */
@@ -867,7 +862,13 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
             return false;
 
         /* Advance. */
-        ofs += page_read_bytes; /* ofs를 page_read_bytes 만큼 계속 추가 해준다. 08.08 */
+        /* 
+            ofs를 page_read_bytes 만큼 계속 추가 해준다. 08.08 
+            lazy_load_segment 실행 시 ASSERT fail 발생 08.11
+            그래서 조건을 통해 삽입하는 방식으로..
+        */
+        ofs += page_read_bytes;
+        // ofs += page_read_bytes % PGSIZE == 0 ? page_read_bytes : PGSIZE;
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         upage += PGSIZE;

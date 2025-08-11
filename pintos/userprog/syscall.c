@@ -18,6 +18,9 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 
+/* 헤더 추가 08.11 */
+#include "vm/vm.h"
+
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 
@@ -482,8 +485,9 @@ static bool check_address(void *addr) {
 
     void *page = pml4_get_page(cur->pml4, addr);
     if (page == NULL) {
-        return false;
+        if (!vm_claim_page(pg_round_down(addr))) {
+            return false;
+        }
     }
-
     return true;
 }

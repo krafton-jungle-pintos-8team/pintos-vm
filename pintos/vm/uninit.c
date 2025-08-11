@@ -33,9 +33,9 @@ void uninit_new(struct page *page, void *va, vm_initializer *init, enum vm_type 
                           .va = va,                         // upage
                           .frame = NULL,                    /* no frame for now */
                           .uninit = (struct uninit_page){
-                              .init = init,                 // lazy_load_segment
-                              .type = type,                 // type
-                              .aux = aux,                   // 파일 정보 구조체
+                              .init = init,                 
+                              .type = type,                 
+                              .aux = aux,                   
                               .page_initializer = initializer,
                           }};
 }
@@ -64,21 +64,12 @@ static void uninit_destroy(struct page *page) {
      * TODO: If you don't have anything to do, just return. */
 
     /* 
-        1차원적인 방법 모든 자원을 NULL로 바꿔준다. 
-        얘는 물리 메모리에 올라간 친구는 아니라 free는 필요없을거 같은데
-        
-        어떻게 자원을 해제하지?
-        
-        free해줄 데이터를 가장 먼저 처리를 해줘야 한다?
+        uninit->init = lazy_load_segment 가 들어오고,
+        uninit->aux = load_segment에서 malloc으로 할당해준 커널 영역 가상 주소
     */
-   
-    free(uninit->aux);
-    free(uninit->init);
-    // free(uninit->page_initializer);
-    // free(uninit);
-    // uninit->aux = NULL;
-    // uninit->init = NULL;
-    // uninit->page_initializer = NULL;
-    // uninit->type = 0;
-    // /* 무슨 함수가 있을거 같은데...음 */
+    
+    /* aux는 process.c load_segment에서 malloc으로 할당해준 메모리 주소인거 같음 */
+    if (uninit->aux != NULL) {
+        free(uninit->aux);
+    }
 }

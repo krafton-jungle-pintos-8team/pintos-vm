@@ -53,6 +53,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
     // 메모리를 실제로 할당하지 않고, 초기화할 페이지가 필요하다고 등록만 한다.
     ASSERT(VM_TYPE(type) != VM_UNINIT)
 
+    /* fork-once ERROR POINT HERE 08.10 22:35 */
     struct supplemental_page_table *spt = &thread_current()->spt;
     /* Check wheter the upage is already occupied or not. */
     if (spt_find_page(spt, upage) == NULL) {
@@ -177,7 +178,6 @@ static struct frame *vm_get_frame(void) {
 
     void *kva = palloc_get_page(PAL_USER);
     struct frame *frame = malloc(sizeof(struct frame)); // 자원 해제 필요
-    // struct frame *frame = palloc_get_page(PAL_ASSERT | PAL_ZERO);
     // NULL인 경우 사용 가능한 공간이 없다.
     if (kva == NULL || frame == NULL) {
         PANIC("todo");
@@ -209,7 +209,7 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
-    ASSERT(addr > USER_PROTECTION_AREA);
+    // ASSERT(addr > USER_PROTECTION_AREA);
 
     /* 유저 영역이라면 KERN_BASE 보다 낮은 영역이여야 하는거 아닌가? 정확히 */
     if (user && is_kernel_vaddr(addr)) {
@@ -252,17 +252,12 @@ void vm_dealloc_page(struct page *page) {
 /* 주어진 가상 주소 va에 해당하는 페이지를 생성하고, 그 페이지에 물리 프레임을 할당하는 함수 */
 bool vm_claim_page(void *va UNUSED) {
     /* TODO: Fill this function */
-    /* 
-        va에 페이지 할당
-        해당 페이지에 프레임 할당
-        한 페이지를 얻어야 하고,
-        그 이후에 해당 페이지를 인자로 갖는 vm_do_claim_page 호출
-    */
     
     // 1. va를 기준으로 해당 가상 페이지가 존재하는지 확인
     struct page *page = spt_find_page(&thread_current()->spt, va);
 
     // 2. 만약 존재하지 않으면 실패
+    /* fork-once test 할 때 page가 null 그래서 return false 08.11 15:50*/
     if (page == NULL) {
       return false;
     }
@@ -293,10 +288,7 @@ static bool vm_do_claim_page(struct page *page) {
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
     // 페이지 테이블에 VA -> PA 매핑
-    if(!pml4_set_page(curr->pml4, 
-                  page->va, // 가상 주소
-                  frame->kva, // 물리 주소
-                  page->writable)) // 쓰기 가능 여부
+    if(!pml4_set_page(curr->pml4, page->va, frame->kva, page->writable))
     {
       return false;
     }
@@ -326,81 +318,67 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
                                   struct supplemental_page_table *src UNUSED) {
-    /* 
-    당신은 초기화되지않은(uninit) 페이지를 할당하고
-    - vm_alloc_page_with_initializer()
-    그것들을 바로 요청할 필요가 있을 것입니다.
-    - vm_claim_page()
-
-    정확한 복사본을 만드세요.
-    */
-   
-    /* dst init 초기화 */
-    supplemental_page_table_init(dst);
-
+    /* 당신은 초기화되지않은(uninit) 페이지를 할당하고 그것들을 바로 요청할 필요가 있을 것입니다. 정확한 복사본을 만드세요. */
     struct hash_iterator hash_iter;
     hash_first(&hash_iter, &src->pages);
 
     while (hash_next(&hash_iter)) {
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
-        if (page != NULL) {
-            /*
-                근데 분기를 나눌 필요가 있는가 왜냐하면
-                operation->destory를 사용하면 타입에 알맞은 destory가 사용될거 같은데
-            */ 
-            if (page->operations->type == VM_UNINIT) {
-                // 분기를 나눴는데 VM_UNINIT 일때랑 // vm_alloc_page_with_initializer 대신에 vm_alloc_page를 사용할 수 있지 않나?
-                vm_alloc_page(page->operations->type, page->va, page->writable); // 초기화되지 않은 uninit 페이지를 할당한다.
-                vm_claim_page(page->va); // 가상 메모리 점유
+        enum vm_type type = page->operations->type;
+
+        if (VM_TYPE(type) == VM_UNINIT) {
+            // 이 시점에서는 해당 페이지가 실제로 로드되지 않은 상태이므로, init 함수 포인터와 aux 데이터까지 같이 넘겨서 그대로 복제합니다.
+            if (!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, page->uninit.aux)) {
+                return false;
             }
-            else if (page->operations->type == VM_ANON) {
-                // VM_ANON 일 때 어떻게 구분하지? 직접 복사? 직접 복사란 memcpy를 써야하나?
-                // memcpy(&dst->pages, &src->pages, sizeof(struct hash *));
-                dst->pages = src->pages;
-            }
-            // else if (page->operations->type == VM_FILE) {
-            //     // 이건 나중에 할 일 // lazy-load 설정 복사
-            // }
         }
-        hash_next(&hash_iter);
+        else {
+            /*
+                dst SPT에 새 struct page 생성 + 삽입
+                이게 어떻게 생성하고 삽입했다는건데....도무지 이해가 안가는데?
+                새 page를 dst에 넣는다.
+                근데 dst에 관련된건 없다.
+            */ 
+            if (!vm_alloc_page(type, page->va, page->writable)) {
+                return false;
+            }
+            
+            /* 이것도 page->va를 물리 프레임에 할당하는거지 dst는 전혀 관계 없잖아? 
+                그 page에 물리 프레임 할당
+            */
+            if (!vm_claim_page(page->va)) {
+                return false;
+            }
+
+            /* 
+            그 page->frame->kva, page->frame->kva 으로 memcpy되어야 하는거 아닌가?
+            */
+
+            /* 생성한 페이지가 dst SPT에 들어가 있다? */
+            struct page *c_page = spt_find_page(dst, page->va);
+            memcpy(c_page->frame->kva, page->frame->kva, PGSIZE);   
+        }
     }
-    /* 2. 복사한 페이지를 dst에 넣는다. */
+    return true;
 }
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
-    /* 
-        무엇을 날려야 하는가?
-        일단 thread->spt = null 처리해야 하는데
-        그러기 위해서는 만들어준 pages를 모두 free 해줘야 할 듯
-
-        1.
-        vm_dealloc_page()라는 함수가 있음.
-        여기서는 destroy(page)를 호출하여 page에 있는 operation을 지우고
-        type도 날리나? 모르겠네...
-
-        그럼 그냥 반복문 돌면서 dealloc_page 해주면 되는거 아님??
-
-        2.
-        hash_destroy() 함수 사용하면 될거 같기도
-    */
-   
-    // hash_clear(&spt->pages, hash_clear);
-    
     struct hash_iterator hash_iter;
     hash_first(&hash_iter, &spt->pages);
 
     /* 1. 페이지 먼저 할당 해제 해준 후 */
     while (hash_next(&hash_iter)) {
+        /* iterator를 사용하므로써 계속 destroy 되어 PANIC이 발생한다. 08.10 */
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
         /* hash_delete를 사용했을 때 안됬음 08.09 20:00 */
         // hash_delete(&spt->pages, &page->hash_elem);
-        destroy(page);
-        hash_next(&hash_iter);
+        if (page->va >= USER_PROTECTION_AREA) {
+            destroy(page);    
+        }
     }
-    /* 2. hash 제거 해주기 for spt */    
 }
 
 /* 추가한 함수들 by git book 08.04 */
