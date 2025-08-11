@@ -330,7 +330,7 @@ int filesize(int fd) {  // Case : 8 -> read()에서 호출
 
     return size;
 }
-
+#include "vm/vm.h"
 int read(int fd, void *buffer, unsigned size) {  // Case : 9
     // 목표 : fd로 파일을 읽어와서, 버퍼에 size 바이트 만큼 읽어오기
 
@@ -482,7 +482,9 @@ static bool check_address(void *addr) {
 
     void *page = pml4_get_page(cur->pml4, addr);
     if (page == NULL) {
-        return false;
+        if (!vm_claim_page(pg_round_down(addr))) {
+            return false;
+        }
     }
 
     return true;
