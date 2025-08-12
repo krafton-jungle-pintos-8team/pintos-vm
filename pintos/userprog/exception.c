@@ -128,11 +128,6 @@ static void page_fault(struct intr_frame *f) {
     /* Turn interrupts back on (they were only off so that we could
        be assured of reading CR2 before it changed). */
     intr_enable();
-    
-    /* args-one test 중 여기서 exit(-1) 된다 08.08 13:29 */
-   //  if ((f->error_code & PF_U) != 0) {
-   //      exit(-1);
-   //  }
 
     /* Determine cause. */
     not_present = (f->error_code & PF_P) == 0;
@@ -141,8 +136,15 @@ static void page_fault(struct intr_frame *f) {
 
 #ifdef VM
     /* For project 3 and later. */
-    if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
+    if (vm_try_handle_fault(f, fault_addr, user, write, not_present)) {
         return;
+    } else {
+        struct thread *cur = thread_current();
+        cur->exit_status = -1;  // 나의 exit 상태 기록
+        printf("%s: exit(-1)\n", cur->name);
+        thread_exit();
+    }
+
 #endif
 
     /* Count page faults. */
