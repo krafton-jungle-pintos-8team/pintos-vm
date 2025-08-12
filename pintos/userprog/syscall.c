@@ -26,6 +26,7 @@
 typedef int pid_t;
 
 static bool check_address(void *addr);
+static bool check_write(void *addr);
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -76,7 +77,6 @@ void syscall_init(void) {
 /* ====== 메인 시스템콜 인터페이스  => 커널공간 ===== */
 void syscall_handler(struct intr_frame *f UNUSED) {
     // TODO: Your implementation goes here.
-    // printf ("system call!\n");  //이부분 Test때는 주석처리
 
     int syscall_number = f->R.rax;  // 시스템 콜 번호는 rax 레지스터에 저장됨
     switch (syscall_number) {       // rdi -> rsi -> rdx -> r10 .....
@@ -341,6 +341,10 @@ int read(int fd, void *buffer, unsigned size) {  // Case : 9
         exit(-1);
     }
 
+    if (!check_write(buffer) || !check_write(buffer+size-1)) {
+        exit(-1);
+    }
+
     // read-bad-fd.c : fd 범위 벗어나는지 체크
     if (fd < 0 || fd >= FDT_MAX_SIZE) {
         exit(-1);
@@ -485,6 +489,17 @@ static bool check_address(void *addr) {
         if (!vm_claim_page(pg_round_down(addr))) {
             return false;
         }
+    }
+
+    return true;
+}
+
+static bool check_write(void *addr) {
+    uint64_t *pml4 = thread_current()->pml4;
+    uint64_t *pte = pml4e_walk(pml4, addr, 0);
+
+    if (pte != NULL && !is_writable(pte)) {
+        return false;
     }
 
     return true;
