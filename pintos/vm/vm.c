@@ -1,6 +1,7 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include <debug.h>
+#include <string.h>
 
 #include "vm/vm.h"
 #include "threads/mmu.h"
@@ -296,7 +297,6 @@ static bool vm_do_claim_page(struct page *page) {
     page->frame = frame;
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
-    // 페이지 테이블에 VA -> PA 매핑.
     if(!pml4_set_page(thread_current()->pml4, page->va, frame->kva, page->writable)){
         return false;
     }
@@ -323,14 +323,43 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
   hash_init(&spt->pages, page_hash, page_less, NULL);
 }
 
-/* Copy supplemental page table from src to dst */
-bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED) {}
+bool supplemental_page_table_copy(struct supplemental_page_table *dst,
+                                  struct supplemental_page_table *src) {
+    // 순회
+    struct hash_iterator hash_iter;
+    hash_first(&hash_iter, &src->pages);
+
+    while (hash_next (&hash_iter)) {
+        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+        enum vm_type type = page_get_type(page);
+
+        // 1. 새로운 uninit page 하나 세팅하기
+        if (!vm_alloc_page(page_get_type(page), page->va, page->writable)){
+            return false;
+        }
+
+        struct page *new_page = spt_find_page(dst, page->va);
+
+        // 2. frame이 설정되어있었으면,
+        if (page->frame != NULL) {
+            // 3. vm_claim_page해서 frame 하나 받아오고
+            if (!vm_claim_page(new_page->va)) {
+                return false;
+            }
+            // 4. frame 내부의 내용 채워넣기
+            memcpy(new_page->frame->kva, page->frame->kva,PGSIZE);
+        }
+    }
+    return true;
+}
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
+
+    // hash_destroy 사용 -> hash_action_func 만들어야할듯?
+    // 지워야할 것
 }
 
 /* 추가한 함수들 by git book 08.04 */
