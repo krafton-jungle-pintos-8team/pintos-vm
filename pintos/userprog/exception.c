@@ -134,15 +134,17 @@ static void page_fault(struct intr_frame *f) {
     write = (f->error_code & PF_W) != 0;
     user = (f->error_code & PF_U) != 0;
 
+    // 사용자 -> 커널로 모드 변환된 경우 rsp 값 저장.
+    if (user) {
+        thread_current()->rsp = f->rsp;
+    }
+
 #ifdef VM
     /* For project 3 and later. */
     if (vm_try_handle_fault(f, fault_addr, user, write, not_present)) {
         return;
     } else {
-        struct thread *cur = thread_current();
-        cur->exit_status = -1;  // 나의 exit 상태 기록
-        printf("%s: exit(-1)\n", cur->name);
-        thread_exit();
+        exit(-1);
     }
 
 #endif

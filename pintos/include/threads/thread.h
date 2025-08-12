@@ -125,6 +125,8 @@ struct thread {
     struct semaphore fork_sema;  // fork 동기화용
     struct thread *parent;       // 부모 스레드 포인터
 
+    /* ----- STACK GROWTH 구현 08.12 ---- */
+    void *rsp;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

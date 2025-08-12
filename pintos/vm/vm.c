@@ -206,7 +206,15 @@ static struct frame *vm_get_frame(void) {
 }
 
 /* Growing the stack. */
-static void vm_stack_growth(void *addr UNUSED) {}
+static void vm_stack_growth(void *addr UNUSED) {
+    uint64_t ofs = 0;
+//    struct supplemental_page_table spt = thread_current()->spt;
+//    while (!spt_find_page(&spt, addr+ofs)) {
+        vm_alloc_page(VM_ANON, addr + ofs, true);
+        vm_claim_page(addr + ofs);
+//        ofs += PGSIZE;
+//    }
+}
 
 /* Handle the fault on write_protected page */
 static bool vm_handle_wp(struct page *page UNUSED) {}
@@ -218,7 +226,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     // user: 사용자가 접근, 커널이 접근?
     // write: 쓰기 접근이었는지, 읽기 접근이었는지.
     // not_present: 페이지가 존재하지 않는지, 읽기 전용 페이지에 쓰기 시도한건지.
-
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = NULL;
     /* TODO: Validate the fault */
@@ -230,21 +237,26 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     }
 
     // 2. 사용자 영역 내에서 invalid 한 영역에 접근
-    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) { // 부등호 처리 확인하기***
+    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) {
         return false;
     }
-    if (0x0 <= (uint64_t) addr && (uint64_t) addr < 0x400000) { // 차후 변수들로 수정
+    if (0 <= (uint64_t) addr && (uint64_t) addr < INVALID_USER_ADDR) {
         return false;
     }
 
     // 3. 접근 권한 잘못됨
-    if (!not_present && write) { // write flag 정확한 의미와, 포함 여부
+    if (!not_present) { // write flag 정확한 의미와, 포함 여부
         /* TODO(선하): 쓰기 방지 페이지(extra) */
         return false;
     }
 
     // 유효하지 않은 페이지 폴트 -> 해결 가능한(할수도있는) 페이지 폴트
-    // not_present
+
+    // stack growth
+    if (addr >= thread_current()->rsp-8 && addr > (void *)USER_STACK_LIMIT) {
+        vm_stack_growth(pg_round_down(addr));
+    }
+
     // 일단 spt에 있는지 확인
     page = spt_find_page(spt, pg_round_down(addr)); // 해당 addr가 속해있는 page의 va를 통해 spt를 탐색해야함.
 

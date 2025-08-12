@@ -888,7 +888,6 @@ static bool setup_stack(struct intr_frame *if_) {
 
     success = vm_alloc_page(VM_ANON, stack_bottom, true);
     success = vm_claim_page(stack_bottom);
-    struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
 
     if_->rsp = USER_STACK;
 
