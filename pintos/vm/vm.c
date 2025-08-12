@@ -98,6 +98,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
     */    
 
     // hash_iterator는 해시 테이블을 순회할 때 사용하는 구조체
+    lock_acquire(&spt->spt_lock);
     struct hash_iterator hash_iter;
     // hash, bucket, elem(head) 초기화 - 순회를 시작할 준비만 한다..?
     hash_first(&hash_iter, &spt->pages); // 순회를 시작할 준비만 해 줌(아직 아무것도 가리키지 않음)
@@ -110,9 +111,11 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
         // 그런 다음, 그 page->va가 우리가 찾는 주소와 같으면 return page.
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
         if (page->va == va) {
+            lock_release(&spt->spt_lock);
             return page;
         }
     }
+    lock_release(&spt->spt_lock);
     return NULL;
 }
 
@@ -125,10 +128,13 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *pa
         return false;
     }
 
+    lock_acquire(&spt->spt_lock);
     // insert page
     if (hash_insert(&spt->pages, &page->hash_elem) != NULL) {
+        lock_release(&spt->spt_lock);
         return false;
     }
+    lock_release(&spt->spt_lock);
     return true;
 }
 
@@ -321,6 +327,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
     -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주소 기준으로 페이지 정보 저장/검색 가능해짐.
   */
   hash_init(&spt->pages, page_hash, page_less, NULL);
+  lock_init(&spt->spt_lock);
 }
 
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,

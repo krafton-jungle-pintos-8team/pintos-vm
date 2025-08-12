@@ -1,9 +1,10 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
+#include <hash.h>
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "vm/vm_type.h"
-#include "lib/kernel/hash.h"
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
@@ -83,6 +84,7 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {
     struct hash pages;
+    struct lock spt_lock;
 };
 
 #include "threads/thread.h"
