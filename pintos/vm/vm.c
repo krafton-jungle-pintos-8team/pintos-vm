@@ -364,9 +364,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
-
-    // hash_destroy 사용 -> hash_action_func 만들어야할듯?
-    // 지워야할 것
+    hash_destroy(&spt->pages, page_destructor);
 }
 
 /* 추가한 함수들 by git book 08.04 */
@@ -387,4 +385,16 @@ bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux
   const struct page *b = hash_entry(b_, struct page, hash_elem);
 
   return a->va < b->va;
+}
+
+void page_destructor(struct hash_elem *e, void *aux) {
+    struct page *page = hash_entry(e, struct page, hash_elem);
+
+    if (page->frame != NULL) {
+        list_remove(&page->frame->elem); // 프레임 테이블에서 제거
+//        palloc_free_page(page->frame->kva); // 할당받은 물리메모리 공간 해제 -> pml4 측에서 해줌
+        free(page->frame);      // frame 구조체 공간 해제
+    }
+
+    vm_dealloc_page(page);  // page 해제
 }

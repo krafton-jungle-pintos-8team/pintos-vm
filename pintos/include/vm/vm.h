@@ -110,5 +110,6 @@ enum vm_type page_get_type(struct page *page);
 /* 여기로 옮겨서 사용해야 하나 for anon.c 08.08 */
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+void page_destructor(struct hash_elem *e, void *aux);
 
 #endif /* VM_VM_H */

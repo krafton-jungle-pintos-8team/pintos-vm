@@ -306,6 +306,8 @@ int process_exec(void *f_name) {
 
     /* We first kill the current context */
     process_cleanup();
+    // spt 다시 init해줌
+    supplemental_page_table_init(&thread_current()->spt);
 
     char *ptr, *arg;
     int arg_cnt = 0;
@@ -883,6 +885,7 @@ static bool setup_stack(struct intr_frame *if_) {
     /* TODO: Your code goes here */
     // stack bottom: 0x4748000~~ 이 가상주소에, 페이지 하나를 claim해. anon으로 해야겠지?
     // page를 하 anon으로 만들어서 vm_do_claim_page호출
+
     success = vm_alloc_page(VM_ANON, stack_bottom, true);
     success = vm_claim_page(stack_bottom);
     struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
