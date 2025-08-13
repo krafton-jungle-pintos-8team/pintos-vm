@@ -307,6 +307,8 @@ int process_exec(void *f_name) {
 
     /* We first kill the current context */
     process_cleanup();
+    // spt 다시 init해줌
+    supplemental_page_table_init(&thread_current()->spt);
 
     char *ptr, *arg;
     int arg_cnt = 0;
@@ -315,6 +317,7 @@ int process_exec(void *f_name) {
         if (arg_cnt >= 512) {
             break;
         }
+
         arg_list[arg_cnt++] = arg;
     }
 
@@ -440,9 +443,8 @@ static void process_cleanup(void) {
 
 #ifdef VM
     supplemental_page_table_kill(&curr->spt);
-    supplemental_page_table_init(&curr->spt);
 #endif
-    
+
     uint64_t *pml4;
     /* Destroy the current process's page directory and switch back
      * to the kernel-only page directory. */
@@ -806,9 +808,7 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     /* TODO: 파일에서 세그먼트를 로드하는 코드 작성 */
     /* load_segment에서 넘겨준 보조 데이터(aux)를 file_info 구조체로 변환 */
     struct file_info *file_info = aux;
-    /* file_info에서 파일 포인터 가져오기 */
-    struct file *file = file_info->file;
-    /* 파일에서 읽기 시작할 오프셋 */
+    struct file *file = file_info->f;
     off_t ofs = file_info->ofs;
     /* 유저 가상 메모리에서의 페이지 시작 주소 */
     uint8_t *upage = file_info->upage;
@@ -824,7 +824,7 @@ static bool lazy_load_segment(struct page *page, void *aux) {
     /* 파일에서 read_bytes만큼 데이터를 읽어 upage(유저 가상 주소 시작 위치)에 직접 복사
        - file_read가 반환한 크기가 read_bytes와 다르면 실패 처리 */
     if (file_read(file, upage, read_bytes) != (int)read_bytes) {
-        free(upage); // 할당된 메모리 해제
+        vm_dealloc_page(page);
         return false;
     }
     /* 나머지 페이지 공간을 0으로 초기화 */
@@ -871,24 +871,19 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
         /* TODO: Set up aux to pass information to the lazy_load_segment. */        
         /* 덮어 쓰여질 가능성이 있어 루프를 돌며 새로운 주소를 생성하여 넘긴다. */
         struct file_info *aux = malloc(sizeof(struct file_info)); 
-        aux->file = file; // 현재 페이지를 위한 파일 포인터 저장
-        aux->ofs = ofs; // 현재 페이지의 파일 읽기 시작 위치 저장
-        aux->read_bytes = page_read_bytes; // 이번 페이지에서 읽어야 하는 바이트 수
-        aux->zero_bytes = page_zero_bytes; // 이번 페이지에서 0으로 채울 바이트 수
-        aux->upage = upage; // 이 데이터를 매핑할 사용자 가상 주소
+        aux->f = file;
+        aux->ofs = ofs;
+        aux->read_bytes = page_read_bytes;
+        aux->zero_bytes = page_zero_bytes;
+        aux->upage = upage;
         
-        // VM_ANON 타입의 페이지를 등록하고, 초기화 함수로 lazy_load_segment 지정
-        if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, aux))
+        if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, aux)){
+            free(aux);
             return false;
+        }
 
         /* Advance. */
-        /* 
-            ofs를 page_read_bytes 만큼 계속 추가 해준다. 08.08 
-            lazy_load_segment 실행 시 ASSERT fail 발생 08.11
-            그래서 조건을 통해 삽입하는 방식으로..
-        */
-        ofs += page_read_bytes;
-        // ofs += page_read_bytes % PGSIZE == 0 ? page_read_bytes : PGSIZE;
+        ofs += page_read_bytes; /* ofs를 page_read_bytes 만큼 계속 추가 해준다. 08.08 */
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         upage += PGSIZE;

@@ -8,8 +8,6 @@
 #include "threads/thread.h"
 #include "userprog/gdt.h"
 
-#include "userprog/syscall.h"
-
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -131,30 +129,24 @@ static void page_fault(struct intr_frame *f) {
        be assured of reading CR2 before it changed). */
     intr_enable();
 
-    if (user) {
-      thread_current()->rsp = f->rsp;
-    }
-
     /* Determine cause. */
     not_present = (f->error_code & PF_P) == 0;
     write = (f->error_code & PF_W) != 0;
     user = (f->error_code & PF_U) != 0;
 
+    // 사용자 -> 커널로 모드 변환된 경우 rsp 값 저장.
+    if (user) {
+        thread_current()->rsp = f->rsp;
+    }
+
 #ifdef VM
     /* For project 3 and later. */
-    if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
+    if (vm_try_handle_fault(f, fault_addr, user, write, not_present)) {
         return;
-    else {
-      struct thread *curr = thread_current();
-      if (curr->parent != NULL) {
-         /* 부모가 wait 중이라면 깨우기 */
-         sema_up(&curr->wait_sema);
-         /* 부모가 자식 정리를 완료할 때까지 대기 */
-         sema_down(&curr->exit_sema);
-      }
-      exit(-1);
-      thread_exit();
+    } else {
+        exit(-1);
     }
+
 #endif
 
     /* Count page faults. */

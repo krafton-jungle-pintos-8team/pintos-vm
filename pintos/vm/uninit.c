@@ -8,6 +8,15 @@
  * function.
  * */
 
+/* uninit.c: 초기화되지 않은 페이지 구현
+ *
+ * 모든 페이지는 초기화되지 않은 페이지로 생성됩니다. 첫 페이지 폴트가 발생하면,
+ * 핸들러 체인은 uninit_initialize (page->operations.swap_in)를 호출합니다.
+ * uninit_initialize 함수는 페이지 객체를 초기화하여 페이지를 특정 페이지 객체
+ * (익명, 파일, 페이지 캐시)로 변형(transmute)시키고, vm_alloc_page_with_initializer
+ * 함수로부터 전달받은 초기화 콜백을 호출합니다.
+*/
+
 #include "vm/uninit.h"
 
 #include "vm/vm.h"
@@ -33,9 +42,9 @@ void uninit_new(struct page *page, void *va, vm_initializer *init, enum vm_type 
                           .va = va,                         // upage
                           .frame = NULL,                    /* no frame for now */
                           .uninit = (struct uninit_page){
-                              .init = init,                 
-                              .type = type,                 
-                              .aux = aux,                   
+                              .init = init,
+                              .type = type,
+                              .aux = aux,
                               .page_initializer = initializer,
                           }};
 }
@@ -52,7 +61,7 @@ static bool uninit_initialize(struct page *page, void *kva) {
     return uninit->page_initializer(page, uninit->type, kva) && (init ? init(page, aux) : true);
 }
 
-/* 
+/*
     uninit_page가 가지고 있는 자원을 해제하세요.
     대부분의 페이지는 다른 페이지 객체로 변환되지만,
     프로세스가 종료될 때까지 한 번도 참조되지 않은 uninit 페이지가 남아 있을 수도 있습니다.
@@ -63,11 +72,11 @@ static void uninit_destroy(struct page *page) {
     /* TODO: Fill this function.
      * TODO: If you don't have anything to do, just return. */
 
-    /* 
+    /*
         uninit->init = lazy_load_segment 가 들어오고,
         uninit->aux = load_segment에서 malloc으로 할당해준 커널 영역 가상 주소
     */
-    
+
     /* aux는 process.c load_segment에서 malloc으로 할당해준 메모리 주소인거 같음 */
     if (uninit->aux != NULL) {
         free(uninit->aux);

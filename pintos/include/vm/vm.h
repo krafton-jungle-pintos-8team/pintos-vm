@@ -1,13 +1,12 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
+#include "vm/file.h"
+#include <hash.h>
 #include "threads/palloc.h"
-#include "vm/vm_type.h"
-#include "lib/kernel/hash.h"
+#include "threads/synch.h"
 #include "vm/uninit.h"
 #include "vm/anon.h"
-#include "vm/file.h"
-#include "vm/uninit.h"
 #include "vm/vm_type.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
@@ -33,7 +32,7 @@ struct frame_table {
 
 /* lazy load segment에서 사용할 추가 구조체 08.07 */
 struct file_info {
-    struct file *file;
+    struct file *f;
     off_t ofs;
     uint8_t *upage;
     uint32_t read_bytes;
@@ -97,6 +96,7 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {
     struct hash pages;
+    struct lock spt_lock;
 };
 
 #include "threads/thread.h"
@@ -122,5 +122,6 @@ enum vm_type page_get_type(struct page *page);
 /* 여기로 옮겨서 사용해야 하나 for anon.c 08.08 */
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+void page_destructor(struct hash_elem *e, void *aux);
 
 #endif /* VM_VM_H */
