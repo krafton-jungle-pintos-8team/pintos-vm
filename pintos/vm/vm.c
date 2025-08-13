@@ -5,7 +5,7 @@
 
 #include "vm/file.h" // Add this line to define struct file_info
 #include "vm/inspect.h"
-#include "vm/vm.h
+#include "vm/vm.h"
 #include "threads/mmu.h"
 #include "threads/malloc.h"
 #include "userprog/process.h" // for struct file_info (만든 것) 08.12
@@ -261,7 +261,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
         // stack growth 가능한지 체크
         if (addr >= thread_current()->rsp - MAX_STACK_ACCESS_DISTANCE
             && addr >= STACK_BOTTOM_LIMIT) {
-            vm_stack_growth(fault_addr);
+            vm_stack_growth(pg_round_down(addr));
             return true;
         }
         return false;

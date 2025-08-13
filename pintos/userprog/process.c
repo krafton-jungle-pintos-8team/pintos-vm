@@ -806,7 +806,7 @@ static bool install_page(void *upage, void *kpage, bool writable) {
 static bool lazy_load_segment(struct page *page, void *aux) {
     /* TODO: Load the segment from the file */
     struct file_info *file_info = aux;
-    struct file *file = file_info->file;
+    struct file *file = file_info->f;
     off_t ofs = file_info->ofs;
     uint8_t *upage = file_info->upage;
     uint32_t read_bytes = file_info->read_bytes;
@@ -854,7 +854,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
         /* TODO: Set up aux to pass information to the lazy_load_segment. */        
         /* 덮어 쓰여질 가능성이 있어 루프를 돌며 새로운 주소를 생성하여 넘긴다. */
         struct file_info *aux = malloc(sizeof(struct file_info)); 
-        aux->file = file;
+        aux->f = file;
         aux->ofs = ofs;
         aux->read_bytes = page_read_bytes;
         aux->zero_bytes = page_zero_bytes;

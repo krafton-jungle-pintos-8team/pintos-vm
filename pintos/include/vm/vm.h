@@ -1,14 +1,12 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
+#include "vm/file.h"
 #include <hash.h>
 #include "threads/palloc.h"
 #include "threads/synch.h"
-#include "vm/vm_type.h"
 #include "vm/uninit.h"
 #include "vm/anon.h"
-#include "vm/file.h"
-#include "vm/uninit.h"
 #include "vm/vm_type.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
@@ -34,7 +32,7 @@ struct frame_table {
 
 /* lazy load segment에서 사용할 추가 구조체 08.07 */
 struct file_info {
-    struct file *file;
+    struct file *f;
     off_t ofs;
     uint8_t *upage;
     uint32_t read_bytes;
