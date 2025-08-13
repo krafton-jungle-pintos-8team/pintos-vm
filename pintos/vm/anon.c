@@ -30,8 +30,8 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva) {
     page->operations = &anon_ops;
     struct anon_page *anon_page = &page->anon;
     /* anon init 추가 08.08 */
-    anon_page->type = type;
-    anon_page->kva = kva;
+    // anon_page->type = type;
+    // anon_page->kva = kva;
     return true;
 }
 
@@ -47,5 +47,9 @@ static bool anon_swap_out(struct page *page) {
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
 static void anon_destroy(struct page *page) {
+    /* 
+        kva는 do_claim_page에서 get_frame으로 frame을 받아오는데,
+        이때 frame의 kva 유저풀 주소가 palloc으로 할당된다. 08.10
+    */
     struct anon_page *anon_page = &page->anon;
 }

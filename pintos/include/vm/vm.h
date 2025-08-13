@@ -17,6 +17,9 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+#define USER_PROTECTION_AREA 0x400000 // 08.09
+#define STACK_BOTTOM_LIMIT (USER_STACK - (1 << 20))  // 1MB
+#define MAX_STACK_ACCESS_DISTANCE 8
 
 /* 프레임 테이블은 무엇이 필요할까?
     1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?
@@ -26,7 +29,15 @@ struct thread;
 */
 struct frame_table {
     struct list frames;
-    void *kva; // key 값
+};
+
+/* lazy load segment에서 사용할 추가 구조체 08.07 */
+struct file_info {
+    struct file *file;
+    off_t ofs;
+    uint8_t *upage;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
 };
 
 /* The representation of "page".
@@ -37,7 +48,6 @@ struct page {
     const struct page_operations *operations;
     void *va;              /* 사용자 공간의 주소 */
     struct frame *frame;   /* 해당 프레임에 대한 역참조 */
-    bool writable;         /* 페이지의 쓰기 가능 여부 */
 
     /* Your implementation */
     struct hash_elem hash_elem;
@@ -58,8 +68,8 @@ struct page {
 /* The representation of "frame" */
 /* 프레임 관리 인터페이스를 구현하는 과정에서 더 많은 멤버를 추가해도 됩니다. */
 struct frame {
-    void *kva; // 커널 가상 주소
-    struct page *page; // 이 프레임을 사용하는 가상 페이지 (역참조)
+    void *kva;
+    struct page *page;
     // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
     bool reference_bit;
     struct list_elem elem; // 프레임 테이블에 넣기 위한 리스트 요소

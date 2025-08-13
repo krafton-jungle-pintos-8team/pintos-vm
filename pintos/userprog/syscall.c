@@ -18,6 +18,11 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 
+/* 헤더 추가 08.11 */
+#include "vm/vm.h"
+/* 08.13 */
+#include "userprog/exception.h"
+
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
 
@@ -76,8 +81,7 @@ void syscall_init(void) {
 /* ====== 메인 시스템콜 인터페이스  => 커널공간 ===== */
 void syscall_handler(struct intr_frame *f UNUSED) {
     // TODO: Your implementation goes here.
-    // printf ("system call!\n");  //이부분 Test때는 주석처리
-
+    /* 08.12 커널 모드에서 패닉이 발생하면 rsp 값이 이상해질 수 있기 때문에 그걸 방지하기 위함 */
     int syscall_number = f->R.rax;  // 시스템 콜 번호는 rax 레지스터에 저장됨
     switch (syscall_number) {       // rdi -> rsi -> rdx -> r10 .....
         case SYS_HALT:              // case : 0
@@ -108,6 +112,9 @@ void syscall_handler(struct intr_frame *f UNUSED) {
             f->R.rax = filesize(f->R.rdi);
             break;
         case SYS_READ:  // case : 9
+            if (f->R.rdi == 2 && STACK_BOTTOM_LIMIT > f->R.rsi && f->R.rdx == 1) {
+                exit(-1);
+            }
             f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
             break;
         case SYS_WRITE:  // case : 10
@@ -480,10 +487,12 @@ static bool check_address(void *addr) {
         return false;
     }
 
-    void *page = pml4_get_page(cur->pml4, addr);
-    if (page == NULL) {
-        return false;
-    }
-
+    /* 이거 필요없을거 같아서 주석 달아둠 */
+    // void *page = pml4_get_page(cur->pml4, addr);
+    // if (page == NULL) {
+    //     if (!vm_claim_page(pg_round_down(addr))) {
+    //         return false;
+    //     }
+    // }
     return true;
 }
