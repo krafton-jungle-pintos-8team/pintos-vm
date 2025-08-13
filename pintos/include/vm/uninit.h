@@ -1,6 +1,7 @@
 #ifndef VM_UNINIT_H
 #define VM_UNINIT_H
-#include "vm/vm.h"
+#include <stdbool.h>
+#include "vm/vm_type.h"
 
 struct page;
 enum vm_type;
@@ -14,7 +15,7 @@ struct uninit_page {
     vm_initializer *init;
     enum vm_type type;
     void *aux;
-    /* Initiate the struct page and maps the pa to the va */
+    /* 물리 주소를 가상 주소에 매핑 초기화 */
     bool (*page_initializer)(struct page *, enum vm_type, void *kva);
 };
 

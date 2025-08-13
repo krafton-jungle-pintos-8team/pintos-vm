@@ -8,6 +8,15 @@
  * function.
  * */
 
+/* uninit.c: 초기화되지 않은 페이지 구현
+ *
+ * 모든 페이지는 초기화되지 않은 페이지로 생성됩니다. 첫 페이지 폴트가 발생하면,
+ * 핸들러 체인은 uninit_initialize (page->operations.swap_in)를 호출합니다.
+ * uninit_initialize 함수는 페이지 객체를 초기화하여 페이지를 특정 페이지 객체
+ * (익명, 파일, 페이지 캐시)로 변형(transmute)시키고, vm_alloc_page_with_initializer
+ * 함수로부터 전달받은 초기화 콜백을 호출합니다.
+*/
+
 #include "vm/uninit.h"
 
 #include "vm/vm.h"
@@ -24,13 +33,14 @@ static const struct page_operations uninit_ops = {
 };
 
 /* DO NOT MODIFY this function */
+/* lazy loading을 위해 미리 페이지의 정보를 설정해두는 것 */
 void uninit_new(struct page *page, void *va, vm_initializer *init, enum vm_type type, void *aux,
                 bool (*initializer)(struct page *, enum vm_type, void *)) {
     ASSERT(page != NULL);
 
     *page = (struct page){.operations = &uninit_ops,
-                          .va = va,
-                          .frame = NULL, /* no frame for now */
+                          .va = va,                         // upage
+                          .frame = NULL,                    /* no frame for now */
                           .uninit = (struct uninit_page){
                               .init = init,
                               .type = type,
@@ -39,11 +49,11 @@ void uninit_new(struct page *page, void *va, vm_initializer *init, enum vm_type 
                           }};
 }
 
-/* Initalize the page on first fault */
+/* 첫 번째 오류 발생 시 페이지를 초기화합니다. */
 static bool uninit_initialize(struct page *page, void *kva) {
     struct uninit_page *uninit = &page->uninit;
 
-    /* Fetch first, page_initialize may overwrite the values */
+    /* 먼저 값을 가져오세요. page_initialize가 그 값들을 덮어쓸 수 있습니다. */
     vm_initializer *init = uninit->init;
     void *aux = uninit->aux;
 
@@ -51,12 +61,24 @@ static bool uninit_initialize(struct page *page, void *kva) {
     return uninit->page_initializer(page, uninit->type, kva) && (init ? init(page, aux) : true);
 }
 
-/* Free the resources hold by uninit_page. Although most of pages are transmuted
- * to other page objects, it is possible to have uninit pages when the process
- * exit, which are never referenced during the execution.
- * PAGE will be freed by the caller. */
+/*
+    uninit_page가 가지고 있는 자원을 해제하세요.
+    대부분의 페이지는 다른 페이지 객체로 변환되지만,
+    프로세스가 종료될 때까지 한 번도 참조되지 않은 uninit 페이지가 남아 있을 수도 있습니다.
+    페이지 자체(PAGE)는 호출자가 해제합니다.
+ */
 static void uninit_destroy(struct page *page) {
     struct uninit_page *uninit UNUSED = &page->uninit;
     /* TODO: Fill this function.
      * TODO: If you don't have anything to do, just return. */
+
+    /*
+        uninit->init = lazy_load_segment 가 들어오고,
+        uninit->aux = load_segment에서 malloc으로 할당해준 커널 영역 가상 주소
+    */
+
+    /* aux는 process.c load_segment에서 malloc으로 할당해준 메모리 주소인거 같음 */
+    if (uninit->aux != NULL) {
+        free(uninit->aux);
+    }
 }

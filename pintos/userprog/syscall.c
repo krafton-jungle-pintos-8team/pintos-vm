@@ -4,19 +4,18 @@
 #include <syscall-nr.h>
 
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
 #include "threads/thread.h"
-#include "userprog/gdt.h"
-
-/* ===== 헤더 파일 추가 07.22 =====*/
-#include "filesys/file.h"
-#include "filesys/filesys.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "userprog/exception.h"
+#include "userprog/gdt.h"
+#include "vm/vm.h"
 
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
@@ -26,6 +25,10 @@
 typedef int pid_t;
 
 static bool check_address(void *addr);
+// 선하 추가 ---
+static bool check_write(void *addr);
+static void check_stack(void *addr);
+// ---
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -76,8 +79,8 @@ void syscall_init(void) {
 /* ====== 메인 시스템콜 인터페이스  => 커널공간 ===== */
 void syscall_handler(struct intr_frame *f UNUSED) {
     // TODO: Your implementation goes here.
-    // printf ("system call!\n");  //이부분 Test때는 주석처리
 
+    /* 08.12 커널 모드에서 패닉이 발생하면 rsp 값이 이상해질 수 있기 때문에 그걸 방지하기 위함 */
     int syscall_number = f->R.rax;  // 시스템 콜 번호는 rax 레지스터에 저장됨
     switch (syscall_number) {       // rdi -> rsi -> rdx -> r10 .....
         case SYS_HALT:              // case : 0
@@ -108,6 +111,10 @@ void syscall_handler(struct intr_frame *f UNUSED) {
             f->R.rax = filesize(f->R.rdi);
             break;
         case SYS_READ:  // case : 9
+            // 성진 추가
+            if (f->R.rdi == 2 && STACK_BOTTOM_LIMIT > f->R.rsi && f->R.rdx == 1) {
+                exit(-1);
+            }
             f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
             break;
         case SYS_WRITE:  // case : 10
@@ -337,9 +344,21 @@ int read(int fd, void *buffer, unsigned size) {  // Case : 9
     // KERN_BASE : 0x8004000000 부터 시작
     // read-bad-ptr.c 테스트에서 0xc0100000 주소접근 => 커널영역 접근 제한 필요
     // 헬퍼함수 안에서 is_kernel_vaddr 로 검증
+
+    // 선하 추가 ---
+    check_stack(buffer);
+    check_stack(buffer+size-1);
+    //---
+
     if (!check_address(buffer) || !check_address(buffer + size - 1)) {
         exit(-1);
     }
+
+    // 선하 추가 ---
+    if (!check_write(buffer) || !check_write(buffer+size-1)) {
+        exit(-1);
+    }
+    // ---
 
     // read-bad-fd.c : fd 범위 벗어나는지 체크
     if (fd < 0 || fd >= FDT_MAX_SIZE) {
@@ -473,6 +492,14 @@ static bool check_address(void *addr) {
     if (is_kernel_vaddr(addr)) {
         return false;
     }
+    // 선하 추가 ---
+    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) {
+        return false;
+    }
+    if (0 <= (uint64_t) addr && (uint64_t) addr < INVALID_USER_ADDR) {
+        return false;
+    }
+    // ---
 
     // 현재 스레드의 페이지 테이블에서 해당 주소가 매핑되어 있는지 확인
     struct thread *cur = thread_current();
@@ -480,10 +507,34 @@ static bool check_address(void *addr) {
         return false;
     }
 
-    void *page = pml4_get_page(cur->pml4, addr);
-    if (page == NULL) {
+    /* 이거 필요없을거 같아서 주석 달아둠 */
+    // void *page = pml4_get_page(cur->pml4, addr);
+    // if (page == NULL) {
+    //     if (!vm_claim_page(pg_round_down(addr))) {
+    //         return false;
+    //     }
+    // }
+    return true;
+}
+
+// 선하 추가 ---
+static bool check_write(void *addr) {
+    uint64_t *pml4 = thread_current()->pml4;
+    uint64_t *pte = pml4e_walk(pml4, addr, 0);
+
+    if (pte != NULL && !is_writable(pte)) {
         return false;
     }
 
     return true;
 }
+
+static void check_stack(void *addr) {
+    if (spt_find_page(&thread_current()->spt, pg_round_down(addr)) == NULL) {
+        if (is_user_vaddr(addr) && addr >= thread_current()->rsp - 8 && addr > (void *)USER_STACK_LIMIT) {
+            vm_alloc_page(VM_ANON, pg_round_down(addr), true);
+            vm_claim_page(pg_round_down(addr));
+        }
+    }
+}
+// ---

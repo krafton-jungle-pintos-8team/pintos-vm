@@ -1,33 +1,13 @@
 #ifndef VM_VM_H
 #define VM_VM_H
 #include <stdbool.h>
-
-#include "threads/palloc.h"
-
-enum vm_type {
-    /* page not initialized */
-    VM_UNINIT = 0,
-    /* page not related to the file, aka anonymous page */
-    VM_ANON = 1,
-    /* page that realated to the file */
-    VM_FILE = 2,
-    /* page that hold the page cache, for project 4 */
-    VM_PAGE_CACHE = 3,
-
-    /* Bit flags to store state */
-
-    /* Auxillary bit flag marker for store information. You can add more
-     * markers, until the value is fit in the int. */
-    VM_MARKER_0 = (1 << 3),
-    VM_MARKER_1 = (1 << 4),
-
-    /* DO NOT EXCEED THIS VALUE. */
-    VM_MARKER_END = (1 << 31),
-};
-
-#include "vm/anon.h"
 #include "vm/file.h"
+#include <hash.h>
+#include "threads/palloc.h"
+#include "threads/synch.h"
 #include "vm/uninit.h"
+#include "vm/anon.h"
+#include "vm/vm_type.h"
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -36,6 +16,28 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+#define USER_PROTECTION_AREA 0x400000 // 08.09
+#define STACK_BOTTOM_LIMIT (USER_STACK - (1 << 20))  // 1MB
+#define MAX_STACK_ACCESS_DISTANCE 8
+
+/* 프레임 테이블은 무엇이 필요할까?
+    1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?
+    그리고 또?
+    ai한테 힌트를 받아 어느 프레임을 가리키는지 알기 위해 어떤 멤버변수가 필요하다고 함
+    그래서 변하지 않는 고유한 값인 kva라고 생각?
+*/
+struct frame_table {
+    struct list frames;
+};
+
+/* lazy load segment에서 사용할 추가 구조체 08.07 */
+struct file_info {
+    struct file *f;
+    off_t ofs;
+    uint8_t *upage;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
+};
 
 /* The representation of "page".
  * This is kind of "parent class", which has four "child class"es, which are
@@ -43,10 +45,12 @@ struct thread;
  * DO NOT REMOVE/MODIFY PREDEFINED MEMBER OF THIS STRUCTURE. */
 struct page {
     const struct page_operations *operations;
-    void *va;            /* Address in terms of user space */
-    struct frame *frame; /* Back reference for frame */
+    void *va;              /* 사용자 공간의 주소 */
+    struct frame *frame;   /* 해당 프레임에 대한 역참조 */
 
     /* Your implementation */
+    struct hash_elem hash_elem;
+    bool writable;         /* 읽기 전용 or 읽기/쓰기 */
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
@@ -61,15 +65,19 @@ struct page {
 };
 
 /* The representation of "frame" */
+/* 프레임 관리 인터페이스를 구현하는 과정에서 더 많은 멤버를 추가해도 됩니다. */
 struct frame {
     void *kva;
     struct page *page;
+    // 추가된 멤버 변수 프레임 마다 관리하여 clock algorithm 구현 시 사용
+    bool reference_bit;
+    struct list_elem elem; // 프레임 테이블에 넣기 위한 리스트 요소
 };
 
-/* The function table for page operations.
- * This is one way of implementing "interface" in C.
- * Put the table of "method" into the struct's member, and
- * call it whenever you needed. */
+/* 페이지 작업을 위한 함수 테이블입니다.
+이것은 C에서 "인터페이스"를 구현하는 한 가지 방법입니다.
+구조체의 멤버로 메서드(함수) 테이블을 넣고,
+필요할 때마다 해당 함수를 호출하면 됩니다. */
 struct page_operations {
     bool (*swap_in)(struct page *, void *);
     bool (*swap_out)(struct page *);
@@ -86,7 +94,10 @@ struct page_operations {
 /* Representation of current process's memory space.
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
-struct supplemental_page_table {};
+struct supplemental_page_table {
+    struct hash pages;
+    struct lock spt_lock;
+};
 
 #include "threads/thread.h"
 void supplemental_page_table_init(struct supplemental_page_table *spt);
@@ -107,5 +118,10 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 void vm_dealloc_page(struct page *page);
 bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
+
+/* 여기로 옮겨서 사용해야 하나 for anon.c 08.08 */
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+void page_destructor(struct hash_elem *e, void *aux);
 
 #endif /* VM_VM_H */

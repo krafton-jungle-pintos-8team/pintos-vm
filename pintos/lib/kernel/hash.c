@@ -44,6 +44,14 @@ bool hash_init(struct hash *h, hash_hash_func *hash, hash_less_func *less, void 
    functions hash_clear(), hash_destroy(), hash_insert(),
    hash_replace(), or hash_delete(), yields undefined behavior,
    whether done in DESTRUCTOR or elsewhere. */
+/*
+ * 해시 테이블 H의 모든 요소를 제거합니다.
+ * DESTRUCTOR가 널(null)이 아닌 경우, 해시 테이블의 각 요소에 대해 DESTRUCTOR가 먼저 호출됩니다.
+ * DESTRUCTOR는 적절하다면 해시 요소가 사용했던 메모리를 할당 해제할 수 있습니다.
+ * 그러나 hash_clear()가 실행되는 동안 DESTRUCTOR 내부든 다른 곳이든 hash_clear(),
+ * hash_destroy(), hash_insert(), hash_replace(), hash_delete()와 같은 함수를 사용하여
+ * 해시 테이블 H를 수정하면 정의되지 않은 동작(undefined behavior)이 발생합니다.
+ */
 void hash_clear(struct hash *h, hash_action_func *destructor) {
     size_t i;
 
@@ -73,16 +81,27 @@ void hash_clear(struct hash *h, hash_action_func *destructor) {
    hash_insert(), hash_replace(), or hash_delete(), yields
    undefined behavior, whether done in DESTRUCTOR or
    elsewhere. */
+/*
+ * 해시 테이블 H를 파괴(destory)합니다.
+ * DESTRUCTOR가 널(null)이 아닌 경우, 먼저 해시 테이블의 각 요소에 대해 DESTRUCTOR가
+ * 한 번씩 호출됩니다. DESTRUCTOR는 적절하다면 해시 요소가 사용했던 메모리를 할당 해제할 수 있습니다.
+ * 하지만 hash_clear()가 실행되는 동안 DESTRUCTOR 내부든 다른 곳이든 hash_clear(),
+ * hash_destroy(), hash_insert(), hash_replace(), hash_delete()와 같은 함수를 사용하여
+ * 해시 테이블 H를 수정하면 정의되지 않은 동작(undefined behavior)이 발생합니다.
+ */
 void hash_destroy(struct hash *h, hash_action_func *destructor) {
     if (destructor != NULL)
         hash_clear(h, destructor);
     free(h->buckets);
 }
 
-/* Inserts NEW into hash table H and returns a null pointer, if
-   no equal element is already in the table.
-   If an equal element is already in the table, returns it
-   without inserting NEW. */
+/* NEW를 해시 테이블 H에 삽입하고,
+동등한(equal)한 요소가 테이블에 **이미 존재하지 않으면**  
+`null 포인터`를 반환합니다. (즉, 삽입이 성공한 경우)
+
+만약 동일한 요소가 이미 테이블에 존재한다면,
+NEW는 삽입하지 않고,  
+그 기존 요소를 반환합니다. */
 struct hash_elem *hash_insert(struct hash *h, struct hash_elem *new) {
     struct list *bucket = find_bucket(h, new);
     struct hash_elem *old = find_elem(h, bucket, new);
@@ -123,6 +142,11 @@ struct hash_elem *hash_find(struct hash *h, struct hash_elem *e) {
    If the elements of the hash table are dynamically allocated,
    or own resources that are, then it is the caller's
    responsibility to deallocate them. */
+/* 해시 테이블 H에서 E와 동일한 요소를 찾아 제거하고 반환합니다.
+ * 만약 동일한 요소가 테이블에 존재하지 않으면 널 포인터를 반환합니다.
+ * 만약 해시 테이블의 요소들이 동적으로 할당되었거나, 그러한 자원을 소유하고 있다면,
+ * 이를 할당 해제하는 것은 호출자의 책임입니다.
+ */
 struct hash_elem *hash_delete(struct hash *h, struct hash_elem *e) {
     struct hash_elem *found = find_elem(h, find_bucket(h, e), e);
     if (found != NULL) {
@@ -180,26 +204,35 @@ void hash_first(struct hash_iterator *i, struct hash *h) {
     i->elem = list_elem_to_hash_elem(list_head(i->bucket));
 }
 
-/* Advances I to the next element in the hash table and returns
-   it.  Returns a null pointer if no elements are left.  Elements
-   are returned in arbitrary order.
+/* I를 해시 테이블에서 다음 요소로 이동시키고, 그 요소를 반환합니다.  
+더 이상 남은 요소가 없으면 null 포인터를 반환합니다.  
+요소들은 임의의 순서로 반환됩니다.
 
-   Modifying a hash table H during iteration, using any of the
-   functions hash_clear(), hash_destroy(), hash_insert(),
-   hash_replace(), or hash_delete(), invalidates all
-   iterators. */
+해시 테이블 H를 순회(iteration)하는 도중에  
+hash_clear(), hash_destroy(), hash_insert(),  
+hash_replace(), hash_delete() 같은 함수로  
+수정하면, **모든 반복자(iterator)가 무효화됩니다.** */
 struct hash_elem *hash_next(struct hash_iterator *i) {
     ASSERT(i != NULL);
 
+    // 현재 i->elem의 다음 리스트 요소 return
     i->elem = list_elem_to_hash_elem(list_next(&i->elem->list_elem));
+    
+    // 이동한 다음 요소가 현재 bucket의 끝이라면, 다음 bucket으로 이동
     while (i->elem == list_elem_to_hash_elem(list_end(i->bucket))) {
+        /*
+            현재 bucket이 마지막 bucket을 넘어섰는지 확인
+            i->hash->buckets: 첫 번째 bucket의 포인터
+            i->hash->buckets + i->hash->bucket_cnt: 마지막 bucket **다음 위치** (즉, 범위의 끝)
+            ++i->bucket: 다음 bucket으로 이동
+        */
         if (++i->bucket >= i->hash->buckets + i->hash->bucket_cnt) {
             i->elem = NULL;
             break;
         }
+        // 현재 bucket 리스트의 다음 bucket의 처음 elem의 주소
         i->elem = list_elem_to_hash_elem(list_begin(i->bucket));
     }
-
     return i->elem;
 }
 
