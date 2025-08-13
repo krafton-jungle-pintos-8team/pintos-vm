@@ -401,7 +401,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
         if (page->va >= USER_PROTECTION_AREA) {
             // list_remove(&page->frame->elem);
-            // hash_destroy(&spt->pages, hash_destructor);
+            hash_destroy(&spt->pages, hash_destructor);
             // 페이지 구조체 자체 해제
             vm_dealloc_page(page);
             return;
