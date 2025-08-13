@@ -4,19 +4,17 @@
 #include <syscall-nr.h>
 
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
 #include "threads/thread.h"
-#include "userprog/gdt.h"
-
-/* ===== 헤더 파일 추가 07.22 =====*/
-#include "filesys/file.h"
-#include "filesys/filesys.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "userprog/gdt.h"
+#include "vm/vm.h"
 
 #define STDIN_FILENO 0
 #define STDOUT_FILENO 1
@@ -27,6 +25,7 @@ typedef int pid_t;
 
 static bool check_address(void *addr);
 static bool check_write(void *addr);
+static void check_stack(void *addr);
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -333,10 +332,13 @@ int filesize(int fd) {  // Case : 8 -> read()에서 호출
 #include "vm/vm.h"
 int read(int fd, void *buffer, unsigned size) {  // Case : 9
     // 목표 : fd로 파일을 읽어와서, 버퍼에 size 바이트 만큼 읽어오기
-
     // KERN_BASE : 0x8004000000 부터 시작
     // read-bad-ptr.c 테스트에서 0xc0100000 주소접근 => 커널영역 접근 제한 필요
     // 헬퍼함수 안에서 is_kernel_vaddr 로 검증
+    check_stack(buffer);
+    check_stack(buffer+size-1);
+
+
     if (!check_address(buffer) || !check_address(buffer + size - 1)) {
         exit(-1);
     }
@@ -478,6 +480,13 @@ static bool check_address(void *addr) {
         return false;
     }
 
+    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) {
+        return false;
+    }
+    if (0 <= (uint64_t) addr && (uint64_t) addr < INVALID_USER_ADDR) {
+        return false;
+    }
+
     // 현재 스레드의 페이지 테이블에서 해당 주소가 매핑되어 있는지 확인
     struct thread *cur = thread_current();
     if (cur->pml4 == NULL) {
@@ -503,4 +512,13 @@ static bool check_write(void *addr) {
     }
 
     return true;
+}
+
+static void check_stack(void *addr) {
+    if (spt_find_page(&thread_current()->spt, pg_round_down(addr)) == NULL) {
+        if (is_user_vaddr(addr) && addr >= thread_current()->rsp - 8 && addr > (void *)USER_STACK_LIMIT) {
+            vm_alloc_page(VM_ANON, pg_round_down(addr), true);
+            vm_claim_page(pg_round_down(addr));
+        }
+    }
 }

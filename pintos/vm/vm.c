@@ -207,13 +207,8 @@ static struct frame *vm_get_frame(void) {
 
 /* Growing the stack. */
 static void vm_stack_growth(void *addr UNUSED) {
-    uint64_t ofs = 0;
-//    struct supplemental_page_table spt = thread_current()->spt;
-//    while (!spt_find_page(&spt, addr+ofs)) {
-        vm_alloc_page(VM_ANON, addr + ofs, true);
-        vm_claim_page(addr + ofs);
-//        ofs += PGSIZE;
-//    }
+    vm_alloc_page(VM_ANON, addr, true);
+    vm_claim_page(addr);
 }
 
 /* Handle the fault on write_protected page */
