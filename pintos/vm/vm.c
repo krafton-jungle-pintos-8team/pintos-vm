@@ -1,15 +1,15 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include <debug.h>  // 08.07 for PANIC
+#include <string.h>
+
+#include "vm/file.h" // Add this line to define struct file_info
+#include "vm/inspect.h"
 #include "vm/vm.h"
 #include "threads/mmu.h"
 #include "threads/malloc.h"
-#include "vm/inspect.h"
-#include "lib/string.h"
-
-#include "include/lib/debug.h" // 08.07 for PANIC
-#include "vm/file.h" // Add this line to define struct file_info
 #include "userprog/process.h" // for struct file_info (만든 것) 08.12
-#include "include/userprog/syscall.h" // for test exit 08.13
+#include "userprog/syscall.h" // for test exit 08.13
 
 static struct frame *vm_get_frame(void);
 static struct frame_table ft;
@@ -25,8 +25,9 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
-    /* frame table 초기화 함수 08.09 */
-    list_init(&ft);
+
+    // 프레임 테이블 초기화
+    list_init(&ft.frames);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -53,7 +54,7 @@ static void hash_destructor(struct hash *h, hash_action_func *destructor);
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
     // 메모리를 실제로 할당하지 않고, 초기화할 페이지가 필요하다고 등록만 한다.
-    ASSERT(VM_TYPE(type) != VM_UNINIT)
+    ASSERT(VM_TYPE(type) != VM_UNINIT);
 
     /* fork-once ERROR POINT HERE 08.10 22:35 */
     struct supplemental_page_table *spt = &thread_current()->spt;
@@ -77,7 +78,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
             uninit_new(page, upage, init, type, aux, file_backed_initializer); // 함수 포인터
             break;
         default:
-            free(page);
+            vm_dealloc_page(page);
             return false;
         }
         /* uninit_new 호출 후 writable 설정 왜냐하면 uninit_new에서 page 구조체를 초기화 해주기 때문 */
@@ -86,7 +87,6 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
         return spt_insert_page(spt, page);
     }   
 err:
-    
     return false;
 }
 
@@ -103,6 +103,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
     */    
 
     // hash_iterator는 해시 테이블을 순회할 때 사용하는 구조체
+    lock_acquire(&spt->spt_lock);
     struct hash_iterator hash_iter;
     // hash, bucket, elem(head) 초기화 - 순회를 시작할 준비만 한다..?
     hash_first(&hash_iter, &spt->pages); // 순회를 시작할 준비만 해 줌(아직 아무것도 가리키지 않음)
@@ -115,9 +116,11 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
         // 그런 다음, 그 page->va가 우리가 찾는 주소와 같으면 return page.
         struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
         if (page->va == va) {
+            lock_release(&spt->spt_lock);
             return page;
         }
     }
+    lock_release(&spt->spt_lock);
     return NULL;
 }
 
@@ -130,10 +133,13 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *pa
         return false;
     }
 
+    lock_acquire(&spt->spt_lock);
     // insert page
     if (hash_insert(&spt->pages, &page->hash_elem) != NULL) {
+        lock_release(&spt->spt_lock);
         return false;
     }
+    lock_release(&spt->spt_lock);
     return true;
 }
 
@@ -217,25 +223,45 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
     /* 유저 영역이라면 KERN_BASE 보다 낮은 영역이여야 하는거 아닌가? 정확히 */
+    // addr: 오류를 일으킨 주소
+    // user: 사용자가 접근, 커널이 접근?
+    // write: 쓰기 접근이었는지, 읽기 접근이었는지.
+    // not_present: 페이지가 존재하지 않는지, 읽기 전용 페이지에 쓰기 시도한건지.
+    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
+    struct page *page = NULL;
+    /* TODO: Validate the fault */
+    /* TODO: Your code goes here */
+    // 유효한 페이지 폴트
+    // 1. 사용자가, kernel 영역에 접근
     if (user && is_kernel_vaddr(addr)) {
         return false;
     }
 
-    if (!not_present && write) {
-        printf("DEBUG: for test_pt-write-code2 in vm_try_handle_fault\n");
+    // 2. 사용자 영역 내에서 invalid 한 영역에 접근
+    if (USER_STACK < (uint64_t) addr && (uint64_t) addr < KERN_BASE) {
+        return false;
+    }
+    if (0 <= (uint64_t) addr && (uint64_t) addr < INVALID_USER_ADDR) {
         return false;
     }
 
-    uint64_t fault_addr = pg_round_down(addr);
-    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = spt_find_page(spt, fault_addr);
-    /* TODO: Validate the fault */
-    /* 유효한 주소인지 확인 */
+    // 3. 접근 권한 잘못됨
+    if (!not_present) { // write flag 정확한 의미와, 포함 여부
+        /* TODO(선하): 쓰기 방지 페이지(extra) */
+        return false;
+    }
+
+    // 유효하지 않은 페이지 폴트 -> 해결 가능한(할수도있는) 페이지 폴트
+
+    // 일단 spt에 있는지 확인
+    page = spt_find_page(spt, pg_round_down(addr)); // 해당 addr가 속해있는 page의 va를 통해 spt를 탐색해야함.
+
+    // 없는 경우 -> palloc 같은게 선행되지 않음.
     if (page == NULL) {
-        if (USER_STACK >= addr 
-            && addr >= thread_current()->rsp - MAX_STACK_ACCESS_DISTANCE
+        // stack growth 가능한지 체크
+        if (addr >= thread_current()->rsp - MAX_STACK_ACCESS_DISTANCE
             && addr >= STACK_BOTTOM_LIMIT) {
-            vm_stack_growth(fault_addr);
+            vm_stack_growth(pg_round_down(addr));
             return true;
         }
         return false;
@@ -251,19 +277,18 @@ void vm_dealloc_page(struct page *page) {
     free(page);
 }
 
-
 /* Claim the page that allocate on VA. */
 /* 주어진 가상 주소 va에 해당하는 페이지를 생성하고, 그 페이지에 물리 프레임을 할당하는 함수 */
 bool vm_claim_page(void *va UNUSED) {
     /* TODO: Fill this function */
-    
+
     // 1. va를 기준으로 해당 가상 페이지가 존재하는지 확인
     struct page *page = spt_find_page(&thread_current()->spt, va);
 
     // 2. 만약 존재하지 않으면 실패
     /* fork-once test 할 때 page가 null 그래서 return false 08.11 15:50*/
     if (page == NULL) {
-      return false;
+        return false;
     }
 
     // 3. 물리 메모리 프레임을 할당하고, 해당 프레임과 페이지를 연결하며 MMU 설정
@@ -276,6 +301,7 @@ bool vm_claim_page(void *va UNUSED) {
     이건 운영체제가 MMU를 통해 CPU가 주소를 해석할 수 있게 해주는 작업
 */
 static bool vm_do_claim_page(struct page *page) {
+    // 물리 프레임 가져오기
     struct frame *frame = vm_get_frame();
     if (frame == NULL) {
         return false;
@@ -292,8 +318,7 @@ static bool vm_do_claim_page(struct page *page) {
 
     /* TODO: page table entry를 삽입하여 페이지의 VA를 프레임의 PA에 매핑합니다. */
     // 페이지 테이블에 VA -> PA 매핑
-    if(!pml4_set_page(curr->pml4, page->va, frame->kva, page->writable))
-    {
+    if(!pml4_set_page(curr->pml4, page->va, frame->kva, page->writable)) {
       return false;
     }
 
@@ -317,6 +342,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
     -> 앞으로 spt_insert_page, spt_find_page 같은 함수들이 이 spt->pages에 접근해서 va 주소 기준으로 페이지 정보 저장/검색 가능해짐.
   */
   hash_init(&spt->pages, page_hash, page_less, NULL);
+  lock_init(&spt->spt_lock);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -335,6 +361,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             struct file_info *fi = malloc(sizeof(struct file_info));
             memcpy(fi, page->uninit.aux, sizeof(struct file_info));
             if (!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, fi)) {
+                free(fi);
                 return false;
             }
         }
@@ -342,12 +369,12 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             /*
                 vm_alloc_page에서는 thread_current()->spm를 사용하기 때문에
                 dst에 new page를 추가한다.
-            */ 
+            */
             if (!vm_alloc_page(type, page->va, page->writable)) {
                 return false;
             }
-            
-            /* 
+
+            /*
                 vm_claim_page에서도 thread_current()->spt를 사용하기에,
                 위에 추가된 page->va를 물리 프레임에 할당한다.
             */
@@ -356,7 +383,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             }
             struct page *c_page = spt_find_page(dst, page->va);
             /* 실제 물리 메모리: kva, 실ㅈ레 데이터 복사 (4KB) */
-            memcpy(c_page->frame->kva, page->frame->kva, PGSIZE);   
+            memcpy(c_page->frame->kva, page->frame->kva, PGSIZE);
         }
     }
     return true;
@@ -385,8 +412,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
 /* 추가한 함수들 by git book 08.04 */
 /* 페이지의 가상 주소 va를 기반으로 해시값을 만드는 함수 */
 // 해시 테이블은 내부적으로 빠르게 찾기 위해 키(va)를 해시값으로 바꾸어서 저장함.
-unsigned
-page_hash(const struct hash_elem *p_, void *aux UNUSED) {
+unsigned page_hash(const struct hash_elem *p_, void *aux UNUSED) {
   // hash_entry()는 hash_elem 구조체 포인터를 struct page 포인터로 바꿔주는 매크로!
   const struct page *p = hash_entry(p_, struct page, hash_elem);
   return hash_bytes(&p->va, sizeof p->va); // p->va: 페이지의 가상 주소. 가상 주소의 바이트 값을 이용해 해시값을 계산함.
@@ -394,14 +420,25 @@ page_hash(const struct hash_elem *p_, void *aux UNUSED) {
 
 /* 두 페이지의 va 중 어느 게 더 작은지 비교해서 정렬 기준을 정하는 함수 */
 // 해시 테이블 내부에 충돌이 발생하면 비교 함수가 필요함. 같은 해시값일 때 정확히 어떤 페이지인지 비교해서 구분해야 하기 때문.
-bool
-page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
+bool page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED) {
   // a, b: 각각 해시 테이블에 저장된 페이지들
   // a->va < b->va: 가상 주소 기준으로 비교함. 주소가 더 작은 페이지가 "먼저"라고 판단하는 기준임.
   const struct page *a = hash_entry(a_, struct page, hash_elem);
   const struct page *b = hash_entry(b_, struct page, hash_elem);
 
   return a->va < b->va;
+}
+
+void page_destructor(struct hash_elem *e, void *aux) {
+    struct page *page = hash_entry(e, struct page, hash_elem);
+
+    if (page->frame != NULL) {
+        list_remove(&page->frame->elem); // 프레임 테이블에서 제거
+//        palloc_free_page(page->frame->kva); // 할당받은 물리메모리 공간 해제 -> pml4 측에서 해줌
+        free(page->frame);      // frame 구조체 공간 해제
+    }
+
+    vm_dealloc_page(page);  // page 해제
 }
 
 static void hash_destructor(struct hash *h, hash_action_func *destructor) {
