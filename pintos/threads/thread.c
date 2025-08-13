@@ -308,7 +308,6 @@ void thread_exit(void) {
 
 #ifdef USERPROG
     process_exit();
-
 #endif
 
     /* Just set our status to dying and schedule another process.

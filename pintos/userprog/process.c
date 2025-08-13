@@ -315,7 +315,6 @@ int process_exec(void *f_name) {
         if (arg_cnt >= 512) {
             break;
         }
-
         arg_list[arg_cnt++] = arg;
     }
 
@@ -441,8 +440,9 @@ static void process_cleanup(void) {
 
 #ifdef VM
     supplemental_page_table_kill(&curr->spt);
+    supplemental_page_table_init(&curr->spt);
 #endif
-
+    
     uint64_t *pml4;
     /* Destroy the current process's page directory and switch back
      * to the kernel-only page directory. */

@@ -17,6 +17,9 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+#define USER_PROTECTION_AREA 0x400000 // 08.09
+#define STACK_BOTTOM_LIMIT (USER_STACK - (1 << 20))  // 1MB
+#define MAX_STACK_ACCESS_DISTANCE 8
 
 /* 프레임 테이블은 무엇이 필요할까?
     1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?

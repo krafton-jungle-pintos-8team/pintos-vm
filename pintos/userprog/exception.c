@@ -8,6 +8,8 @@
 #include "threads/thread.h"
 #include "userprog/gdt.h"
 
+#include "userprog/syscall.h"
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -128,11 +130,10 @@ static void page_fault(struct intr_frame *f) {
     /* Turn interrupts back on (they were only off so that we could
        be assured of reading CR2 before it changed). */
     intr_enable();
-    
-    /* args-one test 중 여기서 exit(-1) 된다 08.08 13:29 */
-   //  if ((f->error_code & PF_U) != 0) {
-   //      exit(-1);
-   //  }
+
+    if (user) {
+      thread_current()->rsp = f->rsp;
+    }
 
     /* Determine cause. */
     not_present = (f->error_code & PF_P) == 0;
@@ -143,6 +144,17 @@ static void page_fault(struct intr_frame *f) {
     /* For project 3 and later. */
     if (vm_try_handle_fault(f, fault_addr, user, write, not_present))
         return;
+    else {
+      struct thread *curr = thread_current();
+      if (curr->parent != NULL) {
+         /* 부모가 wait 중이라면 깨우기 */
+         sema_up(&curr->wait_sema);
+         /* 부모가 자식 정리를 완료할 때까지 대기 */
+         sema_down(&curr->exit_sema);
+      }
+      exit(-1);
+      thread_exit();
+    }
 #endif
 
     /* Count page faults. */

@@ -9,8 +9,7 @@
 #include "include/lib/debug.h" // 08.07 for PANIC
 #include "vm/file.h" // Add this line to define struct file_info
 #include "userprog/process.h" // for struct file_info (만든 것) 08.12
-
-#define USER_PROTECTION_AREA 0x400000 // 08.09
+#include "include/userprog/syscall.h" // for test exit 08.13
 
 static struct frame *vm_get_frame(void);
 static struct frame_table ft;
@@ -47,6 +46,7 @@ enum vm_type page_get_type(struct page *page) {
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+static void hash_destructor(struct hash *h, hash_action_func *destructor);
 
 /* 초기화 함수를 사용해 **대기 중인 페이지 객체(pending page object)**를 생성한다.
 만약 페이지를 생성하고 싶다면, 직접 생성하지 말고 이 함수나 vm_alloc_page를 통해 만들어야 한다. */
@@ -203,7 +203,12 @@ static struct frame *vm_get_frame(void) {
 }
 
 /* Growing the stack. */
-static void vm_stack_growth(void *addr UNUSED) {}
+static void vm_stack_growth(void *addr UNUSED) {
+    while (vm_alloc_page(VM_ANON, addr, true)) {
+        vm_claim_page(addr);
+        addr += PGSIZE;
+    }
+}
 
 /* Handle the fault on write_protected page */
 static bool vm_handle_wp(struct page *page UNUSED) {}
@@ -211,33 +216,30 @@ static bool vm_handle_wp(struct page *page UNUSED) {}
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED,
                          bool write UNUSED, bool not_present UNUSED) {
-    // ASSERT(addr > USER_PROTECTION_AREA);
-
     /* 유저 영역이라면 KERN_BASE 보다 낮은 영역이여야 하는거 아닌가? 정확히 */
     if (user && is_kernel_vaddr(addr)) {
         return false;
     }
 
-    /* wrtie: 쓰기 모드, access 권한 violation
-        페이지는 있는데 읽기 모드라서 violation 발생?
-    */
-    if (write && !not_present) {
-        /*
-            not_present (true): 페이지가 메모리에 없음
-            not_present (false): 이미 페이지가 메모리에 있음
-        */
-        return false;
-    }
-    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = spt_find_page(spt, pg_round_down(addr));
-    /* TODO: Validate the fault */
-    /* 유효한 주소인지 확인 */
-    if (page == NULL) {
+    if (!not_present && write) {
+        printf("DEBUG: for test_pt-write-code2 in vm_try_handle_fault\n");
         return false;
     }
 
-    /* TODO: Your code goes here */
-    /* stack growth 처리해줘야 할 듯. */
+    uint64_t fault_addr = pg_round_down(addr);
+    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
+    struct page *page = spt_find_page(spt, fault_addr);
+    /* TODO: Validate the fault */
+    /* 유효한 주소인지 확인 */
+    if (page == NULL) {
+        if (USER_STACK >= addr 
+            && addr >= thread_current()->rsp - MAX_STACK_ACCESS_DISTANCE
+            && addr >= STACK_BOTTOM_LIMIT) {
+            vm_stack_growth(fault_addr);
+            return true;
+        }
+        return false;
+    }
 
     return vm_do_claim_page(page);
 }
@@ -364,19 +366,20 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
-    // struct hash_iterator hash_iter;
-    // hash_first(&hash_iter, &spt->pages);
+    struct hash_iterator hash_iter;
+    hash_first(&hash_iter, &spt->pages);
 
-    // /* 1. 페이지 먼저 할당 해제 해준 후 */
-    // while (hash_next(&hash_iter)) {
-    //     /* iterator를 사용하므로써 계속 destroy 되어 PANIC이 발생한다. 08.10 */
-    //     struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
-    //     /* hash_delete를 사용했을 때 안됬음 08.09 20:00 */
-    //     // hash_delete(&spt->pages, &page->hash_elem);
-    //     if (page->va >= USER_PROTECTION_AREA) {
-    //         destroy(page);    
-    //     }
-    // }
+    /* 1. 페이지 먼저 할당 해제 해준 후 */
+    while (hash_next(&hash_iter)) {
+        struct page *page = hash_entry(hash_cur(&hash_iter), struct page, hash_elem);
+        if (page->va >= USER_PROTECTION_AREA) {
+            // list_remove(&page->frame->elem);
+            // hash_destroy(&spt->pages, hash_destructor);
+            // 페이지 구조체 자체 해제
+            vm_dealloc_page(page);
+            return;
+        }
+    }
 }
 
 /* 추가한 함수들 by git book 08.04 */
@@ -399,4 +402,11 @@ page_less(const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUS
   const struct page *b = hash_entry(b_, struct page, hash_elem);
 
   return a->va < b->va;
+}
+
+static void hash_destructor(struct hash *h, hash_action_func *destructor) {
+    // struct page *page = hash_entry(, struct page, hash_elem);
+
+    // 필요하면 dirty 페이지 write-back
+    // if (page->writable && page_is_dirty(page)) { ... }
 }
