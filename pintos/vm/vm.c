@@ -51,6 +51,12 @@ static void hash_destructor(struct hash *h, hash_action_func *destructor);
 
 /* 초기화 함수를 사용해 **대기 중인 페이지 객체(pending page object)**를 생성한다.
 만약 페이지를 생성하고 싶다면, 직접 생성하지 말고 이 함수나 vm_alloc_page를 통해 만들어야 한다. */
+/*
+  upage: 유저 가상주소
+  writable: 페이지 쓰기 가능 여부
+  init: lazy load 시 실행할 유저 정의 초기화 함수
+  aux: lazy load 시 초기화 함수에 전달할 추가 데이터
+*/
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writable,
                                     vm_initializer *init, void *aux) {
     // 메모리를 실제로 할당하지 않고, 초기화할 페이지가 필요하다고 등록만 한다.
@@ -59,6 +65,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
     /* fork-once ERROR POINT HERE 08.10 22:35 */
     struct supplemental_page_table *spt = &thread_current()->spt;
     /* Check wheter the upage is already occupied or not. */
+    // spt에 해당 upage가 이미 등록돼 있는지 확인
     if (spt_find_page(spt, upage) == NULL) {
         /* TODO: 페이지를 생성하고, VM 타입에 따라 초기화 함수를 가져오세요. */
         struct page *page = malloc(sizeof(struct page));
@@ -70,6 +77,8 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
         {
         /* TODO: 그런 다음 uninit_new를 호출해서 "uninit" 페이지 구조체를 생성하세요. */
         /* TODO: uninit_new를 호출한 이후에는 해당 구조체의 필드를 수정해야 합니다. */
+        // uninit_new()를 호출해서 아직 물리 메모리를 연결하지 않은 uninit 페이지 객체를 생성
+        // anon_initializer, file_backed_initializer는 페이지 타입별 초기화 함수 포인터
         case VM_ANON:
             /* code */
             uninit_new(page, upage, init, type, aux, anon_initializer); // 함수 포인터
@@ -81,11 +90,11 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
             vm_dealloc_page(page);
             return false;
         }
-        /* uninit_new 호출 후 writable 설정 왜냐하면 uninit_new에서 page 구조체를 초기화 해주기 때문 */
+        /* uninit_new 호출 후 writable 설정. 왜냐하면 uninit_new에서 page 구조체를 초기화 해주기 때문 */
         page->writable = writable;
         /* TODO: 생성한 페이지를 SPT(supplemental page table)에 삽입하세요. */
         return spt_insert_page(spt, page);
-    }   
+    }
 err:
     return false;
 }

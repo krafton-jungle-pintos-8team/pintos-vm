@@ -803,24 +803,33 @@ static bool install_page(void *upage, void *kpage, bool writable) {
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
+/* 페이지 폴트 발생 시, 파일에서 해당 페이지 데이터를 읽어 메모리에 로드하는 함수 */
 static bool lazy_load_segment(struct page *page, void *aux) {
-    /* TODO: Load the segment from the file */
+    /* TODO: 파일에서 세그먼트를 로드하는 코드 작성 */
+    /* load_segment에서 넘겨준 보조 데이터(aux)를 file_info 구조체로 변환 */
     struct file_info *file_info = aux;
     struct file *file = file_info->f;
     off_t ofs = file_info->ofs;
+    /* 유저 가상 메모리에서의 페이지 시작 주소 */
     uint8_t *upage = file_info->upage;
+    /* 파일에서 읽어야 할 바이트 수 */
     uint32_t read_bytes = file_info->read_bytes;
+    /* 0으로 채워야 할 바이트 수 */
     uint32_t zero_bytes = file_info->zero_bytes;
 
     file_seek(file, ofs);
-    /* TODO: This called when the first page fault occurs on address VA. */
-    /* TODO: VA is available when calling this function. */
+    /* TODO: 이 함수는 주소 VA에서 첫 번째 페이지 폴트가 발생했을 때 호출된다. */
+    /* TODO: 이 함수를 호출할 때는 VA가 접근 가능한 상태여야 한다. */
     /* Load this page. */
+    /* 파일에서 read_bytes만큼 데이터를 읽어 upage(유저 가상 주소 시작 위치)에 직접 복사
+       - file_read가 반환한 크기가 read_bytes와 다르면 실패 처리 */
     if (file_read(file, upage, read_bytes) != (int)read_bytes) {
         vm_dealloc_page(page);
         return false;
     }
+    /* 나머지 페이지 공간을 0으로 초기화 */
     memset(upage + read_bytes, 0, zero_bytes);
+    /* 로드 성공 */
     return true;
 }
 
@@ -838,17 +847,25 @@ ZERO_BYTES 바이트는 UPAGE + READ_BYTES 위치부터 0으로 초기화되어�
 메모리 할당 오류나 디스크 읽기 오류가 발생하지 않으면 true를 반환하고,
 그런 오류가 발생하면 false를 반환합니다.
 */
+/* 파일 데이터를 즉시 메모리에 올리지 않고, lazy_load_segment()에 필요한 정보를 구조체(aux)에 담아
+페이지 폴트 시 로드되도록 예약하는 함수 */
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable) {
+    // 읽을 바이트 + 0으로 채울 바이트가 반드시 페이지 크기의 배수여야 함
     ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+    // UPAGE 주소가 페이지 경계로 정렬되어 있어야 함
     ASSERT(pg_ofs(upage) == 0);
+    // 파일의 오프셋도 페이지 경계에 맞춰져 있어야 함
     ASSERT(ofs % PGSIZE == 0);
 
+    // 읽을 데이터(read_bytes)나 0으로 채울 데이터(zero_bytes)가 남아있는 동안 반복
     while (read_bytes > 0 || zero_bytes > 0) {
-        /* Do calculate how to fill this page.
-         * We will read PAGE_READ_BYTES bytes from FILE
-         * and zero the final PAGE_ZERO_BYTES bytes. */
+        /* 이번 페이지에서 읽을 데이터 크기 계산
+           - 남은 read_bytes가 페이지 크기보다 작으면 그만큼만 읽음
+           - 그 외엔 한 페이지(PGSIZE) 전체를 읽음
+        */
         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+        // 이번 페이지에서 남는 부분은 0으로 채울 바이트 수 계산
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
   
         /* TODO: Set up aux to pass information to the lazy_load_segment. */        
@@ -871,7 +888,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
         zero_bytes -= page_zero_bytes;
         upage += PGSIZE;
     }
-    return true;
+    return true; // 모든 페이지 등록 성공
 }
 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
