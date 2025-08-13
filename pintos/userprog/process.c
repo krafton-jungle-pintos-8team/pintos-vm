@@ -281,6 +281,7 @@ static void argument_stack(char **argv, int argc, struct intr_frame *if_, void *
     if_->R.rsi = if_->rsp;
 
     // 5. 가짜 반환 주소 push => 함수 호출규약 준수
+
     if_->rsp -= sizeof(void *);
     *(uint64_t *)if_->rsp = 0;
 }
@@ -742,6 +743,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 
         /* Add the page to the process's address space. */
         if (!install_page(upage, kpage, writable)) {
+            printf("fail\n");
             palloc_free_page(kpage);
             return false;
         }
@@ -788,42 +790,41 @@ static bool install_page(void *upage, void *kpage, bool writable) {
             pml4_set_page(t->pml4, upage, kpage, writable));
 }
 #else
+/* define VM 하면서 install_page가 없어져서 위에서 가져옴 08.07 */
+static bool install_page(void *upage, void *kpage, bool writable) {
+    struct thread *t = thread_current();
+
+    /* Verify that there's not already a page at that virtual
+     * address, then map our page there. */
+    return (pml4_get_page(t->pml4, upage) == NULL &&
+            pml4_set_page(t->pml4, upage, kpage, writable));
+}
+
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
-
-static struct laze_load_aux {
-    struct file *file;
-    off_t ofs;
-    size_t page_read_bytes;
-    size_t page_zero_bytes;
-};
-
 static bool lazy_load_segment(struct page *page, void *aux) {
     /* TODO: Load the segment from the file */
-    /* TODO: This called when the first page fault occurs on address VA. */
-    /* TODO: VA is available when calling this function. */
-
-    struct laze_load_aux *laze_aux = aux;
-    struct file *file = laze_aux->file;
-    off_t ofs = laze_aux->ofs;
-    size_t page_read_bytes = laze_aux->page_read_bytes;
-    size_t page_zero_bytes = laze_aux->page_zero_bytes;
-
-    void *kpage = page->frame->kva;
+    struct file_info *file_info = aux;
+    struct file *file = file_info->file;
+    off_t ofs = file_info->ofs;
+    uint8_t *upage = file_info->upage;
+    uint32_t read_bytes = file_info->read_bytes;
+    uint32_t zero_bytes = file_info->zero_bytes;
 
     file_seek(file, ofs);
+    /* TODO: This called when the first page fault occurs on address VA. */
+    /* TODO: VA is available when calling this function. */
     /* Load this page. */
-    if (file_read(file, kpage, page_read_bytes) != (int)page_read_bytes) {
+    if (file_read(file, upage, read_bytes) != (int)read_bytes) {
         vm_dealloc_page(page);
         return false;
     }
-    memset(kpage + page_read_bytes, 0, page_zero_bytes);
-
+    memset(upage + read_bytes, 0, zero_bytes);
     return true;
 }
 
-/*
+/* 
 파일의 오프셋 OFS에서 시작하는 세그먼트를 UPAGE 주소에 적재합니다.
 READ_BYTES + ZERO_BYTES 바이트의 가상 메모리가 다음과 같이 초기화됩니다:
 UPAGE에 있는 READ_BYTES는 파일에서 읽어야 한다.
@@ -843,24 +844,23 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
     ASSERT(pg_ofs(upage) == 0);
     ASSERT(ofs % PGSIZE == 0);
 
-    // loop 시작
     while (read_bytes > 0 || zero_bytes > 0) {
         /* Do calculate how to fill this page.
          * We will read PAGE_READ_BYTES bytes from FILE
          * and zero the final PAGE_ZERO_BYTES bytes. */
         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-        /* TODO: Set up aux to pass information to the lazy_load_segment. */
-        // aux 생성을 위한 공간 할당 -> 매번 할당해줘야함. 보관하고 있어야하니까.
-        struct laze_load_aux *aux = malloc(sizeof(struct laze_load_aux));
+  
+        /* TODO: Set up aux to pass information to the lazy_load_segment. */        
+        /* 덮어 쓰여질 가능성이 있어 루프를 돌며 새로운 주소를 생성하여 넘긴다. */
+        struct file_info *aux = malloc(sizeof(struct file_info)); 
         aux->file = file;
         aux->ofs = ofs;
-        aux->page_read_bytes = page_read_bytes;
-        aux->page_zero_bytes = page_zero_bytes;
-
-        // 해당 정보에 대한, uninit 페이지 생성.
-        if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, (void *) aux)) {
+        aux->read_bytes = page_read_bytes;
+        aux->zero_bytes = page_zero_bytes;
+        aux->upage = upage;
+        
+        if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, aux)){
             free(aux);
             return false;
         }
@@ -877,20 +877,23 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage, uint32_t 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
 static bool setup_stack(struct intr_frame *if_) {
     bool success = false;
-    void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
-
-    /* TODO: Map the stack on stack_bottom and claim the page immediately.
-     * TODO: If success, set the rsp accordingly.
-     * TODO: You should mark the page is stack. */
-    /* TODO: Your code goes here */
-    // stack bottom: 0x4748000~~ 이 가상주소에, 페이지 하나를 claim해. anon으로 해야겠지?
-    // page를 하 anon으로 만들어서 vm_do_claim_page호출
-
-    success = vm_alloc_page(VM_ANON, stack_bottom, true);
+    void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE); // 1 페이지 사이즈(4KB)를 미리 할당을 위함
+    struct thread *curr = thread_current();
+    
+    /* TODO: stack_bottom 위치에 스택을 매핑하고, 즉시 해당 페이지를 claim하세요. */
+    success = vm_alloc_page_with_initializer(VM_ANON | VM_MARKER_0, stack_bottom, true, NULL, NULL);
+    if (!success) {
+        return false;
+    }
     success = vm_claim_page(stack_bottom);
 
-    if_->rsp = USER_STACK;
-
-    return success;
+    /* TODO: 성공했다면, rsp 값을 그에 맞게 설정하세요. */
+    /* TODO: 해당 페이지를 스택으로 표시해야 합니다. */
+    /* TODO: 여기에 당신의 코드를 작성하세요. */
+    if (success) {
+        if_->rsp = USER_STACK;
+        return true;
+    }
+    return false;
 }
 #endif /* VM */

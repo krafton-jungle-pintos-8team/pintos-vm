@@ -18,13 +18,27 @@ struct page_operations;
 struct thread;
 
 #define VM_TYPE(type) ((type) & 7)
+#define USER_PROTECTION_AREA 0x400000 // 08.09
+#define STACK_BOTTOM_LIMIT (USER_STACK - (1 << 20))  // 1MB
+#define MAX_STACK_ACCESS_DISTANCE 8
 
 /* 프레임 테이블은 무엇이 필요할까?
     1. 프레임들을 담을 수 있는 리스트, 이걸 hash로 갖고 있어도 괜찮나?
     그리고 또?
+    ai한테 힌트를 받아 어느 프레임을 가리키는지 알기 위해 어떤 멤버변수가 필요하다고 함
+    그래서 변하지 않는 고유한 값인 kva라고 생각?
 */
 struct frame_table {
     struct list frames;
+};
+
+/* lazy load segment에서 사용할 추가 구조체 08.07 */
+struct file_info {
+    struct file *file;
+    off_t ofs;
+    uint8_t *upage;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
 };
 
 /* The representation of "page".
@@ -38,7 +52,7 @@ struct page {
 
     /* Your implementation */
     struct hash_elem hash_elem;
-    bool writable;
+    bool writable;         /* 읽기 전용 or 읽기/쓰기 */
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */
